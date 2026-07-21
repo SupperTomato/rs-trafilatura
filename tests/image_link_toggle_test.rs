@@ -35,8 +35,14 @@ fn include_images_true_collects_image_urls() {
 
     // Should have collected image URLs
     assert_eq!(result.images.len(), 2);
-    assert!(images_contain_src(&result.images, "https://example.com/image1.jpg"));
-    assert!(images_contain_src(&result.images, "https://example.com/image2.png"));
+    assert!(images_contain_src(
+        &result.images,
+        "https://example.com/image1.jpg"
+    ));
+    assert!(images_contain_src(
+        &result.images,
+        "https://example.com/image2.png"
+    ));
 }
 
 /// Test AC#2: include_images: false (default) returns empty images vec
@@ -107,8 +113,41 @@ fn include_images_extracts_lazy_loaded_images() {
 
     // Should collect both normal and data-src images
     assert_eq!(result.images.len(), 2);
-    assert!(images_contain_src(&result.images, "https://example.com/lazy.jpg"));
-    assert!(images_contain_src(&result.images, "https://example.com/normal.jpg"));
+    assert!(images_contain_src(
+        &result.images,
+        "https://example.com/lazy.jpg"
+    ));
+    assert!(images_contain_src(
+        &result.images,
+        "https://example.com/normal.jpg"
+    ));
+}
+
+#[test]
+fn include_images_prefers_highest_width_srcset_candidate() {
+    let html = r#"
+        <html><body>
+            <article>
+                <p>Content with responsive images.</p>
+                <img
+                    src="https://example.com/image-2048.jpg"
+                    srcset="https://example.com/image-240.jpg 240w, https://example.com/image-480.jpg 480w, https://example.com/image-976.jpg 976w"
+                    alt="Responsive image">
+                <p>Additional paragraph content to ensure this document meets the minimum extraction threshold.</p>
+                <p>Further paragraph with enough text to satisfy the scoring algorithm for content quality.</p>
+            </article>
+        </body></html>
+    "#;
+
+    let options = Options {
+        include_images: true,
+        ..Options::default()
+    };
+
+    let result = extract_with_options(html, &options).expect("extraction failed");
+
+    assert_eq!(result.images.len(), 1);
+    assert_eq!(result.images[0].src, "https://example.com/image-976.jpg");
 }
 
 /// Test that duplicate images are not added twice
@@ -134,8 +173,14 @@ fn include_images_deduplicates_urls() {
 
     // Should only have 2 unique images
     assert_eq!(result.images.len(), 2);
-    assert!(images_contain_src(&result.images, "https://example.com/same.jpg"));
-    assert!(images_contain_src(&result.images, "https://example.com/different.jpg"));
+    assert!(images_contain_src(
+        &result.images,
+        "https://example.com/same.jpg"
+    ));
+    assert!(images_contain_src(
+        &result.images,
+        "https://example.com/different.jpg"
+    ));
 }
 
 // ============================================================================
@@ -285,7 +330,10 @@ fn both_image_and_link_toggles_enabled() {
 
     // Should have image
     assert_eq!(result.images.len(), 1);
-    assert!(images_contain_src(&result.images, "https://example.com/pic.jpg"));
+    assert!(images_contain_src(
+        &result.images,
+        "https://example.com/pic.jpg"
+    ));
 
     // Should have href
     if let Some(html) = result.content_html {
@@ -326,6 +374,44 @@ fn both_image_and_link_toggles_disabled() {
     }
 }
 
+#[test]
+fn include_media_preserves_video_and_audio_in_html() {
+    let html = r#"
+        <html><body>
+            <article>
+                <p>Article content with media elements.</p>
+                <video controls poster="https://example.com/poster.jpg">
+                    <source src="https://example.com/movie.mp4" type="video/mp4">
+                    <track src="https://example.com/captions.vtt" kind="captions">
+                </video>
+                <audio controls>
+                    <source src="https://example.com/audio.mp3" type="audio/mpeg">
+                </audio>
+                <p>Additional paragraph content to ensure this document meets the minimum extraction threshold.</p>
+                <p>Further paragraph with enough text to satisfy the scoring algorithm for content quality.</p>
+            </article>
+        </body></html>
+    "#;
+
+    let options = Options {
+        include_videos: true,
+        include_audio: true,
+        output_markdown: true,
+        ..Options::default()
+    };
+
+    let result = extract_with_options(html, &options).expect("extraction failed");
+    let content_html = result
+        .content_html
+        .as_deref()
+        .expect("expected content_html");
+
+    assert!(content_html.contains("<video"));
+    assert!(content_html.contains("movie.mp4"));
+    assert!(content_html.contains("<audio"));
+    assert!(content_html.contains("audio.mp3"));
+}
+
 /// Test that image toggle doesn't affect other content
 #[test]
 fn image_toggle_doesnt_affect_text_content() {
@@ -340,15 +426,23 @@ fn image_toggle_doesnt_affect_text_content() {
         </body></html>
     "#;
 
-    let with_images = extract_with_options(html, &Options {
-        include_images: true,
-        ..Options::default()
-    }).expect("extraction failed");
+    let with_images = extract_with_options(
+        html,
+        &Options {
+            include_images: true,
+            ..Options::default()
+        },
+    )
+    .expect("extraction failed");
 
-    let without_images = extract_with_options(html, &Options {
-        include_images: false,
-        ..Options::default()
-    }).expect("extraction failed");
+    let without_images = extract_with_options(
+        html,
+        &Options {
+            include_images: false,
+            ..Options::default()
+        },
+    )
+    .expect("extraction failed");
 
     // Text content should be identical
     assert_eq!(with_images.content_text, without_images.content_text);
@@ -369,15 +463,23 @@ fn link_toggle_doesnt_affect_text_content() {
         </body></html>
     "#;
 
-    let with_links = extract_with_options(html, &Options {
-        include_links: true,
-        ..Options::default()
-    }).expect("extraction failed");
+    let with_links = extract_with_options(
+        html,
+        &Options {
+            include_links: true,
+            ..Options::default()
+        },
+    )
+    .expect("extraction failed");
 
-    let without_links = extract_with_options(html, &Options {
-        include_links: false,
-        ..Options::default()
-    }).expect("extraction failed");
+    let without_links = extract_with_options(
+        html,
+        &Options {
+            include_links: false,
+            ..Options::default()
+        },
+    )
+    .expect("extraction failed");
 
     // Text content should be identical (link text preserved in both)
     assert_eq!(with_links.content_text, without_links.content_text);
@@ -413,7 +515,10 @@ fn figcaption_extracted_from_figure() {
     assert_eq!(result.images.len(), 1);
     let img = &result.images[0];
     assert_eq!(img.src, "https://example.com/photo.jpg");
-    assert_eq!(img.caption, Some("This is the caption for the photo.".to_string()));
+    assert_eq!(
+        img.caption,
+        Some("This is the caption for the photo.".to_string())
+    );
 }
 
 /// Test that figcaption whitespace is normalized
@@ -443,7 +548,10 @@ fn figcaption_whitespace_normalized() {
 
     assert_eq!(result.images.len(), 1);
     let img = &result.images[0];
-    assert_eq!(img.caption, Some("Caption with multiple spaces and newlines.".to_string()));
+    assert_eq!(
+        img.caption,
+        Some("Caption with multiple spaces and newlines.".to_string())
+    );
 }
 
 /// Test that images without figcaption have None caption
@@ -578,7 +686,10 @@ fn og_image_exact_match_is_hero() {
 
     assert_eq!(result.images.len(), 3);
     assert!(!result.images[0].is_hero, "First image should not be hero");
-    assert!(result.images[1].is_hero, "Second image (og:image match) should be hero");
+    assert!(
+        result.images[1].is_hero,
+        "Second image (og:image match) should be hero"
+    );
     assert!(!result.images[2].is_hero, "Third image should not be hero");
 }
 
@@ -608,7 +719,10 @@ fn og_image_filename_match_is_hero() {
 
     assert_eq!(result.images.len(), 3);
     assert!(!result.images[0].is_hero, "First image should not be hero");
-    assert!(result.images[1].is_hero, "Second image (filename match) should be hero");
+    assert!(
+        result.images[1].is_hero,
+        "Second image (filename match) should be hero"
+    );
     assert!(!result.images[2].is_hero, "Third image should not be hero");
 }
 
@@ -667,11 +781,17 @@ fn figcaption_and_hero_combined() {
 
     // First image should be hero (filename matches og:image)
     assert!(result.images[0].is_hero);
-    assert_eq!(result.images[0].caption, Some("The featured image".to_string()));
+    assert_eq!(
+        result.images[0].caption,
+        Some("The featured image".to_string())
+    );
 
     // Second image should not be hero
     assert!(!result.images[1].is_hero);
-    assert_eq!(result.images[1].caption, Some("A secondary image".to_string()));
+    assert_eq!(
+        result.images[1].caption,
+        Some("A secondary image".to_string())
+    );
 }
 
 // ============================================================================
@@ -736,15 +856,27 @@ fn full_image_pipeline_integration() {
     assert_eq!(hero.src, "https://images.example.com/hero-photo.jpg");
     assert_eq!(hero.filename, "hero-photo.jpg");
     assert_eq!(hero.alt, Some("Hero image alt text".to_string()));
-    assert_eq!(hero.caption, Some("This is the hero image caption.".to_string()));
-    assert!(hero.is_hero, "First image should be hero (matches og:image filename)");
+    assert_eq!(
+        hero.caption,
+        Some("This is the hero image caption.".to_string())
+    );
+    assert!(
+        hero.is_hero,
+        "First image should be hero (matches og:image filename)"
+    );
 
     // Image 2: Secondary from figure without caption
     let secondary = &result.images[1];
-    assert_eq!(secondary.src, "https://example.com/path/secondary.png?size=large");
+    assert_eq!(
+        secondary.src,
+        "https://example.com/path/secondary.png?size=large"
+    );
     assert_eq!(secondary.filename, "secondary.png");
     assert_eq!(secondary.alt, Some("Secondary alt".to_string()));
-    assert_eq!(secondary.caption, None, "Figure without figcaption should have no caption");
+    assert_eq!(
+        secondary.caption, None,
+        "Figure without figcaption should have no caption"
+    );
     assert!(!secondary.is_hero);
 
     // Image 3: Standalone image
@@ -752,7 +884,10 @@ fn full_image_pipeline_integration() {
     assert_eq!(standalone.src, "https://example.com/standalone.gif");
     assert_eq!(standalone.filename, "standalone.gif");
     assert_eq!(standalone.alt, Some("Standalone image".to_string()));
-    assert_eq!(standalone.caption, None, "Standalone image should have no caption");
+    assert_eq!(
+        standalone.caption, None,
+        "Standalone image should have no caption"
+    );
     assert!(!standalone.is_hero);
 
     // Image 4: Lazy-loaded image
@@ -786,11 +921,21 @@ fn pipeline_deduplicates_images() {
 
     // Should only have 2 unique images
     assert_eq!(result.images.len(), 2);
-    assert!(images_contain_src(&result.images, "https://example.com/same.jpg"));
-    assert!(images_contain_src(&result.images, "https://example.com/different.jpg"));
+    assert!(images_contain_src(
+        &result.images,
+        "https://example.com/same.jpg"
+    ));
+    assert!(images_contain_src(
+        &result.images,
+        "https://example.com/different.jpg"
+    ));
 
     // First occurrence's alt text should be preserved
-    let same_img = result.images.iter().find(|i| i.src == "https://example.com/same.jpg").unwrap();
+    let same_img = result
+        .images
+        .iter()
+        .find(|i| i.src == "https://example.com/same.jpg")
+        .unwrap();
     assert_eq!(same_img.alt, Some("First occurrence".to_string()));
 }
 

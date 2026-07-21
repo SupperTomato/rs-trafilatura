@@ -1,10 +1,11 @@
-use rs_trafilatura::extract;
+use rs_trafilatura::{extract, extract_with_options, Options};
 
 const PADDING: &str = "<p>Additional paragraph to ensure sufficient content for the extraction algorithm to consider this a real article.</p><p>Second padding paragraph with more text to satisfy the minimum content scoring threshold for table extraction.</p>";
 
 #[test]
 fn extract_formats_simple_tables_in_content_text_and_preserves_in_content_html() {
-    let html = format!(r#"
+    let html = format!(
+        r#"
         <article>
             <p>Intro text for the article with enough content.</p>
             {PADDING}
@@ -13,7 +14,8 @@ fn extract_formats_simple_tables_in_content_text_and_preserves_in_content_html()
                 <tr><td>A</td><td>B</td></tr>
             </table>
         </article>
-    "#);
+    "#
+    );
 
     let result = extract(&html);
     match result {
@@ -63,7 +65,8 @@ fn extract_treats_layout_tables_as_regular_content() {
 
 #[test]
 fn extract_handles_colspan_and_rowspan_in_table_text() {
-    let html = format!(r#"
+    let html = format!(
+        r#"
         <article>
             {PADDING}
             <table>
@@ -73,7 +76,8 @@ fn extract_handles_colspan_and_rowspan_in_table_text() {
                 <tr><td>B2</td></tr>
             </table>
         </article>
-    "#);
+    "#
+    );
 
     let result = extract(&html);
     match result {
@@ -118,7 +122,8 @@ fn extract_handles_large_tables_without_panic() {
 
 #[test]
 fn extract_treats_single_row_table_as_layout() {
-    let html = format!(r#"
+    let html = format!(
+        r#"
         <article>
             {PADDING}
             <table>
@@ -126,7 +131,8 @@ fn extract_treats_single_row_table_as_layout() {
             </table>
             <p>BODY_TEXT</p>
         </article>
-    "#);
+    "#
+    );
 
     let result = extract(&html);
     match result {
@@ -139,4 +145,39 @@ fn extract_treats_single_row_table_as_layout() {
         }
         Err(err) => panic!("expected Ok(_), got Err({err:?})"),
     }
+}
+
+#[test]
+fn markdown_nested_tables_do_not_expand_superlinearly() {
+    let nested_rows = (0..100)
+        .map(|i| format!("<tr><td>cell{i}a</td><td>cell{i}b</td></tr>"))
+        .collect::<String>();
+    let html = format!(
+        "<html><body><article>{PADDING}<table><tr><td><table>{nested_rows}</table></td><td>x</td></tr></table></article></body></html>"
+    );
+
+    let result = extract_with_options(
+        &html,
+        &Options {
+            output_markdown: true,
+            include_tables: true,
+            favor_recall: true,
+            ..Options::default()
+        },
+    )
+    .expect("extraction failed");
+
+    let markdown = result
+        .content_markdown
+        .as_deref()
+        .expect("expected markdown output");
+
+    assert!(markdown.contains("cell0a"));
+    assert!(markdown.contains("cell99b"));
+    assert!(
+        markdown.len() < html.len() * 20,
+        "markdown grew too much: html={} markdown={}",
+        html.len(),
+        markdown.len()
+    );
 }

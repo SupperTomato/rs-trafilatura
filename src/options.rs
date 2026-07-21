@@ -41,6 +41,16 @@ pub struct Options {
     /// Default: `false`
     pub include_images: bool,
 
+    /// Preserve video elements in extracted HTML/Markdown.
+    ///
+    /// Default: `false`
+    pub include_videos: bool,
+
+    /// Preserve audio elements in extracted HTML/Markdown.
+    ///
+    /// Default: `false`
+    pub include_audio: bool,
+
     /// Preserve link URLs in extracted content.
     ///
     /// Default: `false`
@@ -109,7 +119,6 @@ pub struct Options {
     pub min_extracted_size: usize,
 
     // === Additional threshold fields (Story 6-1) ===
-
     /// Minimum text length for extracted content (characters).
     ///
     /// Content shorter than this is considered insufficient.
@@ -238,6 +247,8 @@ impl Default for Options {
             include_comments: false,
             include_tables: true,
             include_images: false,
+            include_videos: false,
+            include_audio: false,
             include_links: false,
             favor_precision: false,
             favor_recall: false,
@@ -281,6 +292,8 @@ mod tests {
         assert!(!opts.include_comments);
         assert!(opts.include_tables);
         assert!(!opts.include_images);
+        assert!(!opts.include_videos);
+        assert!(!opts.include_audio);
         assert!(!opts.include_links);
         assert!(!opts.favor_precision);
         assert!(!opts.favor_recall);

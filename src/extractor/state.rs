@@ -3,8 +3,8 @@
 //! This module provides `ExtractionState` to track processed nodes and potential tags.
 //! Replaces Go's `element.Data = "done"` pattern with HashSet-based tracking.
 
-use std::collections::HashSet;
 use dom_query::NodeId;
+use std::collections::HashSet;
 
 /// Tracks extraction state including processed nodes and potential tags.
 ///
@@ -84,6 +84,21 @@ impl ExtractionState {
         // Add image tag if images included
         if opts.include_images {
             self.add_potential_tag("img");
+            self.add_potential_tag("figure");
+            self.add_potential_tag("picture");
+            self.add_potential_tag("source");
+        }
+
+        if opts.include_videos {
+            self.add_potential_tag("video");
+            self.add_potential_tag("source");
+            self.add_potential_tag("track");
+        }
+
+        if opts.include_audio {
+            self.add_potential_tag("audio");
+            self.add_potential_tag("source");
+            self.add_potential_tag("track");
         }
 
         // Add link tag if links included
@@ -140,8 +155,8 @@ mod tests {
         assert!(state.is_potential_tag("h1"));
         assert!(state.is_potential_tag("blockquote"));
         assert!(!state.is_potential_tag("table")); // not in default
-        assert!(!state.is_potential_tag("img"));   // not in default
-        assert!(!state.is_potential_tag("a"));     // not in default (added with include_links)
+        assert!(!state.is_potential_tag("img")); // not in default
+        assert!(!state.is_potential_tag("a")); // not in default (added with include_links)
     }
 
     #[test]
@@ -171,6 +186,26 @@ mod tests {
         state.configure_from_options(&opts);
 
         assert!(state.is_potential_tag("img"));
+        assert!(state.is_potential_tag("figure"));
+        assert!(state.is_potential_tag("picture"));
+        assert!(state.is_potential_tag("source"));
+    }
+
+    #[test]
+    fn test_extraction_state_configure_with_media() {
+        let mut state = ExtractionState::new();
+        let opts = Options {
+            include_videos: true,
+            include_audio: true,
+            ..Options::default()
+        };
+
+        state.configure_from_options(&opts);
+
+        assert!(state.is_potential_tag("video"));
+        assert!(state.is_potential_tag("audio"));
+        assert!(state.is_potential_tag("source"));
+        assert!(state.is_potential_tag("track"));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use rs_trafilatura::{extract, Error};
+use rs_trafilatura::{extract, extract_with_options, Error, Options};
 use std::time::{Duration, Instant};
 
 #[test]
@@ -93,7 +93,10 @@ fn extract_handles_large_html_without_panic() {
     let elapsed = start.elapsed();
 
     assert!(matches!(result, Ok(_) | Err(Error::NoContent)));
-    assert!(elapsed < Duration::from_secs(60), "large HTML parsing took {elapsed:?}");
+    assert!(
+        elapsed < Duration::from_secs(60),
+        "large HTML parsing took {elapsed:?}"
+    );
 }
 
 #[test]
@@ -118,4 +121,35 @@ fn extract_handles_null_bytes_gracefully() {
     let html = "text\x00more";
     let result = extract(html);
     assert!(matches!(result, Ok(_) | Err(Error::NoContent)));
+}
+
+#[test]
+fn max_extracted_len_truncates_on_utf8_char_boundary() {
+    let html = r#"
+        <html><body><article>
+            <p>😀😀😀😀😀 content with multibyte characters that should truncate safely.</p>
+            <p>Additional paragraph content to ensure this document meets extraction thresholds.</p>
+            <p>Further paragraph with enough text to satisfy the scoring algorithm for content quality.</p>
+        </article></body></html>
+    "#;
+
+    let result = extract_with_options(
+        html,
+        &Options {
+            max_extracted_len: 3,
+            min_extracted_len: 0,
+            min_output_size: 0,
+            ..Options::default()
+        },
+    )
+    .expect("extraction should not panic or fail");
+
+    assert!(result
+        .content_text
+        .is_char_boundary(result.content_text.len()));
+    assert!(result.content_text.len() <= 3);
+    assert!(result
+        .warnings
+        .iter()
+        .any(|w| w.contains("Content truncated")));
 }

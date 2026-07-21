@@ -6,8 +6,7 @@
 use crate::dom::{self, Document, Selection};
 use crate::etree;
 use crate::extractor::tags::{
-    TAGS_TO_CLEAN, TAGS_TO_STRIP, EMPTY_TAGS_TO_REMOVE_SET,
-    TABLE_TAGS_TO_STRIP,
+    EMPTY_TAGS_TO_REMOVE_SET, TABLE_TAGS_TO_STRIP, TAGS_TO_CLEAN, TAGS_TO_STRIP,
 };
 use crate::link_density::link_density_test_with_info;
 use crate::lru::LruCache;
@@ -24,9 +23,8 @@ const MAX_PRUNE_DOCUMENT_SIZE: usize = 1_000_000;
 /// Elements allowed to have width/height attributes
 ///
 /// Go source: `elementWithSizeAttr` in settings.go line 79
-pub static ELEMENT_WITH_SIZE_ATTR: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
-    ["table", "th", "td", "hr", "pre"].into_iter().collect()
-});
+pub static ELEMENT_WITH_SIZE_ATTR: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| ["table", "th", "td", "hr", "pre"].into_iter().collect());
 
 /// Allowed attributes for post-cleaning
 ///
@@ -34,40 +32,215 @@ pub static ELEMENT_WITH_SIZE_ATTR: LazyLock<HashSet<&'static str>> = LazyLock::n
 /// List of allowed attributes taken from go-domdistiller
 pub static ALLOWED_ATTRIBUTES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     [
-        "abbr", "accept-charset", "accept", "accesskey", "action", "align", "alink",
-        "allow", "allowfullscreen", "allowpaymentrequest", "alt", "archive", "as",
-        "async", "autocapitalize", "autocomplete", "autocorrect", "autofocus",
-        "autoplay", "autopictureinpicture", "axis", "background", "behavior",
-        "bgcolor", "border", "bordercolor", "capture", "cellpadding", "cellspacing",
-        "char", "challenge", "charoff", "charset", "checked", "cite", "class",
-        "classid", "clear", "code", "codebase", "codetype", "color", "cols",
-        "colspan", "compact", "content", "contenteditable", "controls",
-        "controlslist", "conversiondestination", "coords", "crossorigin",
-        "csp", "data", "datetime", "declare", "decoding", "default", "defer",
-        "dir", "direction", "dirname", "disabled", "disablepictureinpicture",
-        "disableremoteplayback", "disallowdocumentaccess", "download", "draggable",
-        "elementtiming", "enctype", "end", "enterkeyhint", "event", "exportparts",
-        "face", "for", "form", "formaction", "formenctype", "formmethod",
-        "formnovalidate", "formtarget", "frame", "frameborder", "headers",
-        "height", "hidden", "high", "href", "hreflang", "hreftranslate", "hspace",
-        "http-equiv", "id", "imagesizes", "imagesrcset", "importance",
-        "impressiondata", "impressionexpiry", "incremental", "inert", "inputmode",
-        "integrity", "is", "ismap", "keytype", "kind", "invisible", "label", "lang",
-        "language", "latencyhint", "leftmargin", "link", "list", "loading", "longdesc",
-        "loop", "low", "lowsrc", "manifest", "marginheight", "marginwidth", "max",
-        "maxlength", "mayscript", "media", "method", "min", "minlength", "multiple",
-        "muted", "name", "nohref", "nomodule", "nonce", "noresize", "noshade",
-        "novalidate", "nowrap", "object", "open", "optimum", "part", "pattern",
-        "placeholder", "playsinline", "ping", "policy", "poster", "preload", "pseudo",
-        "readonly", "referrerpolicy", "rel", "reportingorigin", "required", "resources",
-        "rev", "reversed", "role", "rows", "rowspan", "rules", "sandbox", "scheme",
-        "scope", "scrollamount", "scrolldelay", "scrolling", "select", "selected",
-        "shadowroot", "shadowrootdelegatesfocus", "shape", "size", "sizes", "slot",
-        "span", "spellcheck", "src", "srcset", "srcdoc", "srclang", "standby", "start",
-        "step", "style", "summary", "tabindex", "target", "text", "title", "topmargin",
-        "translate", "truespeed", "trusttoken", "type", "usemap", "valign", "value",
-        "valuetype", "version", "vlink", "vspace", "virtualkeyboardpolicy",
-        "webkitdirectory", "width", "wrap",
+        "abbr",
+        "accept-charset",
+        "accept",
+        "accesskey",
+        "action",
+        "align",
+        "alink",
+        "allow",
+        "allowfullscreen",
+        "allowpaymentrequest",
+        "alt",
+        "archive",
+        "as",
+        "async",
+        "autocapitalize",
+        "autocomplete",
+        "autocorrect",
+        "autofocus",
+        "autoplay",
+        "autopictureinpicture",
+        "axis",
+        "background",
+        "behavior",
+        "bgcolor",
+        "border",
+        "bordercolor",
+        "capture",
+        "cellpadding",
+        "cellspacing",
+        "char",
+        "challenge",
+        "charoff",
+        "charset",
+        "checked",
+        "cite",
+        "class",
+        "classid",
+        "clear",
+        "code",
+        "codebase",
+        "codetype",
+        "color",
+        "cols",
+        "colspan",
+        "compact",
+        "content",
+        "contenteditable",
+        "controls",
+        "controlslist",
+        "conversiondestination",
+        "coords",
+        "crossorigin",
+        "csp",
+        "data",
+        "datetime",
+        "declare",
+        "decoding",
+        "default",
+        "defer",
+        "dir",
+        "direction",
+        "dirname",
+        "disabled",
+        "disablepictureinpicture",
+        "disableremoteplayback",
+        "disallowdocumentaccess",
+        "download",
+        "draggable",
+        "elementtiming",
+        "enctype",
+        "end",
+        "enterkeyhint",
+        "event",
+        "exportparts",
+        "face",
+        "for",
+        "form",
+        "formaction",
+        "formenctype",
+        "formmethod",
+        "formnovalidate",
+        "formtarget",
+        "frame",
+        "frameborder",
+        "headers",
+        "height",
+        "hidden",
+        "high",
+        "href",
+        "hreflang",
+        "hreftranslate",
+        "hspace",
+        "http-equiv",
+        "id",
+        "imagesizes",
+        "imagesrcset",
+        "importance",
+        "impressiondata",
+        "impressionexpiry",
+        "incremental",
+        "inert",
+        "inputmode",
+        "integrity",
+        "is",
+        "ismap",
+        "keytype",
+        "kind",
+        "invisible",
+        "label",
+        "lang",
+        "language",
+        "latencyhint",
+        "leftmargin",
+        "link",
+        "list",
+        "loading",
+        "longdesc",
+        "loop",
+        "low",
+        "lowsrc",
+        "manifest",
+        "marginheight",
+        "marginwidth",
+        "max",
+        "maxlength",
+        "mayscript",
+        "media",
+        "method",
+        "min",
+        "minlength",
+        "multiple",
+        "muted",
+        "name",
+        "nohref",
+        "nomodule",
+        "nonce",
+        "noresize",
+        "noshade",
+        "novalidate",
+        "nowrap",
+        "object",
+        "open",
+        "optimum",
+        "part",
+        "pattern",
+        "placeholder",
+        "playsinline",
+        "ping",
+        "policy",
+        "poster",
+        "preload",
+        "pseudo",
+        "readonly",
+        "referrerpolicy",
+        "rel",
+        "reportingorigin",
+        "required",
+        "resources",
+        "rev",
+        "reversed",
+        "role",
+        "rows",
+        "rowspan",
+        "rules",
+        "sandbox",
+        "scheme",
+        "scope",
+        "scrollamount",
+        "scrolldelay",
+        "scrolling",
+        "select",
+        "selected",
+        "shadowroot",
+        "shadowrootdelegatesfocus",
+        "shape",
+        "size",
+        "sizes",
+        "slot",
+        "span",
+        "spellcheck",
+        "src",
+        "srcset",
+        "srcdoc",
+        "srclang",
+        "standby",
+        "start",
+        "step",
+        "style",
+        "summary",
+        "tabindex",
+        "target",
+        "text",
+        "title",
+        "topmargin",
+        "translate",
+        "truespeed",
+        "trusttoken",
+        "type",
+        "usemap",
+        "valign",
+        "value",
+        "valuetype",
+        "version",
+        "vlink",
+        "vspace",
+        "virtualkeyboardpolicy",
+        "webkitdirectory",
+        "width",
+        "wrap",
     ]
     .into_iter()
     .collect()
@@ -79,16 +252,14 @@ pub static ALLOWED_ATTRIBUTES: LazyLock<HashSet<&'static str>> = LazyLock::new(|
 /// Tags that represent line breaks
 ///
 /// Go source: `listXmlLbTags` in tag-converter.go line 7
-static XML_LB_TAGS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
-    ["br", "hr", "lb"].into_iter().collect()
-});
+static XML_LB_TAGS: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| ["br", "hr", "lb"].into_iter().collect());
 
 /// Tags for graphic elements
 ///
 /// Go source: `listXmlGraphicTags` in tag-converter.go line 10
-static XML_GRAPHIC_TAGS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
-    ["img"].into_iter().collect()
-});
+static XML_GRAPHIC_TAGS: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| ["img"].into_iter().collect());
 
 /// Tags that may contain code/quotes
 ///
@@ -199,7 +370,7 @@ fn doc_cleaning_inner(doc: &Document, opts: &Options, preserve_tags: &[&str]) {
 
     // === Bulk cleaning via html-cleaning crate ===
     {
-        use html_cleaning::{HtmlCleaner, CleaningOptions};
+        use html_cleaning::{CleaningOptions, HtmlCleaner};
 
         // Start from the trafilatura preset, but disable prune_empty and
         // normalize_whitespace — we handle those with size guards below.
@@ -212,13 +383,35 @@ fn doc_cleaning_inner(doc: &Document, opts: &Options, preserve_tags: &[&str]) {
 
         // Remove tags that the page type profile wants to preserve
         if !preserve_tags.is_empty() {
-            cleaning_opts.tags_to_remove.retain(|t| !preserve_tags.contains(&t.as_str()));
+            cleaning_opts
+                .tags_to_remove
+                .retain(|t| !preserve_tags.contains(&t.as_str()));
         }
 
-        // Conditional: include tables — don't remove figure/picture/source
+        // Conditional media preservation.
         if opts.include_images {
-            cleaning_opts.tags_to_remove.retain(|t| !matches!(t.as_str(), "figure" | "picture" | "source"));
+            cleaning_opts
+                .tags_to_remove
+                .retain(|t| !matches!(t.as_str(), "figure" | "picture" | "source"));
             cleaning_opts.tags_to_strip.retain(|t| t != "img");
+        }
+
+        if opts.include_videos {
+            cleaning_opts
+                .tags_to_remove
+                .retain(|t| !matches!(t.as_str(), "video" | "source" | "track"));
+            cleaning_opts
+                .tags_to_strip
+                .retain(|t| !matches!(t.as_str(), "video" | "source" | "track"));
+        }
+
+        if opts.include_audio {
+            cleaning_opts
+                .tags_to_remove
+                .retain(|t| !matches!(t.as_str(), "audio" | "source" | "track"));
+            cleaning_opts
+                .tags_to_strip
+                .retain(|t| !matches!(t.as_str(), "audio" | "source" | "track"));
         }
 
         // Conditional: exclude tables — add table tags to removal
@@ -276,6 +469,14 @@ fn build_clean_selector(opts: &Options) -> Vec<String> {
         selectors.retain(|t| !matches!(t.as_str(), "figure" | "picture" | "source"));
     }
 
+    if opts.include_videos {
+        selectors.retain(|t| !matches!(t.as_str(), "video" | "source" | "track"));
+    }
+
+    if opts.include_audio {
+        selectors.retain(|t| !matches!(t.as_str(), "audio" | "source" | "track"));
+    }
+
     // Add modal/gdpr/consent selectors - these are cookie consent banners that
     // should be removed before content extraction.
     //
@@ -288,7 +489,7 @@ fn build_clean_selector(opts: &Options) -> Vec<String> {
         ".modal-content".to_string(),
         ".modal-backdrop".to_string(),
         ".modal-overlay".to_string(),
-        "[class~=\"modal\"]".to_string(),  // Exact word match (space-separated)
+        "[class~=\"modal\"]".to_string(), // Exact word match (space-separated)
         "[role=\"dialog\"]".to_string(),
         // GDPR/consent patterns
         "[id*=\"gdpr\"]".to_string(),
@@ -312,6 +513,14 @@ fn build_strip_selector(opts: &Options) -> Vec<String> {
 
     if opts.include_images {
         tags.retain(|t| t != "img");
+    }
+
+    if opts.include_videos {
+        tags.retain(|t| !matches!(t.as_str(), "video" | "source" | "track"));
+    }
+
+    if opts.include_audio {
+        tags.retain(|t| !matches!(t.as_str(), "audio" | "source" | "track"));
     }
 
     tags
@@ -377,9 +586,10 @@ pub fn post_cleaning(doc: &Document) {
         for (key, _) in attrs {
             let should_remove = match key.as_str() {
                 // Always remove presentational attributes
-                "id" | "class" | "align" | "background" | "bgcolor" | "border"
-                | "cellpadding" | "cellspacing" | "frame" | "hspace" | "rules"
-                | "style" | "valign" | "vspace" => true,
+                "id" | "class" | "align" | "background" | "bgcolor" | "border" | "cellpadding"
+                | "cellspacing" | "frame" | "hspace" | "rules" | "style" | "valign" | "vspace" => {
+                    true
+                }
 
                 // Size attributes only allowed on specific elements
                 "width" | "height" => !allows_size,
@@ -493,8 +703,7 @@ pub fn is_share_button_text(text: &str) -> bool {
 
     // Skip if text has alphanumeric prefix (not a standalone share button)
     // Go pattern: (![^a-zA-Z0-9_])? means optional non-alphanumeric prefix
-    let test_str = trimmed
-        .trim_start_matches(|c: char| !c.is_alphanumeric() && c != '_');
+    let test_str = trimmed.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '_');
 
     // Check for exact matches of social media / share button text
     let patterns = [
@@ -552,7 +761,8 @@ pub fn is_share_button_text(text: &str) -> bool {
         || lower.starts_with("join our newsletter")
         || lower.starts_with("breaking news emails")  // NBC News newsletter
         || lower.starts_with("get breaking news")     // Newsletter signup text
-        || lower == "subscribe"                        // Standalone subscribe button
+        || lower == "subscribe"
+    // Standalone subscribe button
     {
         return true;
     }
@@ -608,15 +818,15 @@ pub fn is_share_button_text(text: &str) -> bool {
         // News agency attribution at start of text
         // e.g., "Reuters", "PTI", "AFP", "Staff Reports", "By Reuters"
         let news_agencies = [
-            "reuters,",       // "Reuters, Washington"
-            "pti,",           // "PTI, New Delhi"
-            "ians,",          // "IANS, Mumbai"
-            "ani,",           // "ANI, Delhi"
-            "xinhua,",        // "Xinhua, Beijing"
-            "staff reports",  // Common byline
+            "reuters,",      // "Reuters, Washington"
+            "pti,",          // "PTI, New Delhi"
+            "ians,",         // "IANS, Mumbai"
+            "ani,",          // "ANI, Delhi"
+            "xinhua,",       // "Xinhua, Beijing"
+            "staff reports", // Common byline
             "staff report",
             "staff writer",
-            "special to",     // "Special to The Times"
+            "special to", // "Special to The Times"
         ];
         for agency in news_agencies {
             if lower.starts_with(agency) {
@@ -630,7 +840,10 @@ pub fn is_share_button_text(text: &str) -> bool {
             let after_by = &trimmed[3..];
             // Check that next char is uppercase (author name) and no sentence structure
             if let Some(first_char) = after_by.chars().next() {
-                if first_char.is_uppercase() && !after_by.contains(". ") && !after_by.contains(", the ") {
+                if first_char.is_uppercase()
+                    && !after_by.contains(". ")
+                    && !after_by.contains(", the ")
+                {
                     return true;
                 }
             }
@@ -908,14 +1121,10 @@ pub fn handle_text_node(
 /// Prune unwanted nodes from the HTML tree
 ///
 /// Go equivalent: `pruneUnwantedNodes(tree, queries, withBackup...)`
-/// 
+///
 /// Note: This function modifies the tree in place and returns a clone.
 /// In Go, the tree is cloned internally. We do the same here.
-pub fn prune_unwanted_nodes(
-    tree: &Selection,
-    queries: &[Rule],
-    with_backup: bool,
-) {
+pub fn prune_unwanted_nodes(tree: &Selection, queries: &[Rule], with_backup: bool) {
     let old_len = if with_backup {
         dom::text_content(tree).chars().count()
     } else {
@@ -924,7 +1133,7 @@ pub fn prune_unwanted_nodes(
 
     // Collect all elements to remove first
     let mut all_elements_to_remove = Vec::new();
-    
+
     for query in queries {
         let sub_elements = selector::query_all(tree, *query);
         all_elements_to_remove.extend(sub_elements);
@@ -1376,7 +1585,9 @@ mod tests {
         assert!(is_image_file("image.PNG"));
         assert!(is_image_file("icon.gif"));
         assert!(is_image_file("banner.webp"));
-        assert!(is_image_file("https://example.com/path/to/image.jpeg?v=123"));
+        assert!(is_image_file(
+            "https://example.com/path/to/image.jpeg?v=123"
+        ));
         assert!(!is_image_file("document.pdf"));
         assert!(!is_image_file("script.js"));
         assert!(!is_image_file(""));

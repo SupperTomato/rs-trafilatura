@@ -4,6 +4,12 @@ Fast and accurate web content extraction in Rust.
 
 A high-performance Rust port of [trafilatura](https://github.com/adbar/trafilatura) / [go-trafilatura](https://github.com/markusmobius/go-trafilatura), extracting clean, readable content from web pages while removing boilerplate, navigation, and advertisements.
 
+## Project Status
+
+The crate is suitable for local services, batch extraction, and pipelines that can tolerate occasional extraction misses and use `extraction_quality` to route low-confidence pages to a fallback. For production-facing workloads, validate against your own URL corpus, cap output sizes, and keep browser/LLM fallbacks for JavaScript-heavy or low-confidence pages.
+
+The page-type classifier and extraction-quality predictor are Rust-specific additions. They are not part of upstream Python Trafilatura; they route pages to tuned extraction profiles and expose confidence signals for fallback decisions.
+
 ## Features
 
 - **Fast**: 71 files/s for articles, 46 files/s overall on a 1,497-page benchmark (pure Rust, compile-time regex)
@@ -13,7 +19,7 @@ A high-performance Rust port of [trafilatura](https://github.com/adbar/trafilatu
 - **Extraction Quality Predictor**: ML-based confidence scoring (0.0-1.0) using a 27-feature XGBoost model that predicts extraction F1 — pages below 0.80 are candidates for LLM fallback
 - **Markdown Output**: GitHub Flavored Markdown preserving headings, lists, tables, bold/italic, code blocks
 - **Rich Metadata**: Title, author, date, description, categories, tags, license, images from JSON-LD, Open Graph, Dublin Core, and HTML meta tags
-- **Configurable**: 28 options to tune precision/recall tradeoff, content selection, and output format
+- **Configurable**: 30 options to tune precision/recall tradeoff, content selection, and output format
 - **Robust**: Handles malformed HTML gracefully with automatic character encoding detection (UTF-8, ISO-8859-1, Windows-1252)
 
 ## Quick Start

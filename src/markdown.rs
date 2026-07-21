@@ -80,7 +80,10 @@ pub fn escape_markdown(text: &str, in_code_block: bool) -> String {
 /// by the converter when `escape_special_chars(true)` is set. This function
 /// is no longer called internally but is kept for backwards compatibility.
 #[must_use]
-#[deprecated(since = "0.1.2", note = "Use quick_html2md's built-in escape_special_chars option instead")]
+#[deprecated(
+    since = "0.1.2",
+    note = "Use quick_html2md's built-in escape_special_chars option instead"
+)]
 pub fn post_process_markdown(markdown: &str) -> String {
     if markdown.is_empty() {
         return String::new();
@@ -312,7 +315,8 @@ pub fn html_table_to_markdown(table_html: &str) -> String {
             let mut row = Vec::new();
             for th in tr.select("th").iter() {
                 let text = th.text().trim().to_string();
-                let align = th.attr("align")
+                let align = th
+                    .attr("align")
                     .map(|a| Alignment::from_str(&a))
                     .unwrap_or(Alignment::None);
                 alignments.push(align);
@@ -334,7 +338,8 @@ pub fn html_table_to_markdown(table_html: &str) -> String {
 
             // Capture alignment from first row if no header
             if !has_header && rows.is_empty() {
-                let align = cell.attr("align")
+                let align = cell
+                    .attr("align")
                     .map(|a| Alignment::from_str(&a))
                     .unwrap_or(Alignment::None);
                 alignments.push(align);
@@ -382,7 +387,11 @@ pub fn html_table_to_markdown(table_html: &str) -> String {
         for (col_idx, cell) in row.iter().enumerate() {
             let width = col_widths.get(col_idx).copied().unwrap_or(3);
             output.push(' ');
-            output.push_str(&pad_cell(cell, width, alignments.get(col_idx).copied().unwrap_or(Alignment::None)));
+            output.push_str(&pad_cell(
+                cell,
+                width,
+                alignments.get(col_idx).copied().unwrap_or(Alignment::None),
+            ));
             output.push_str(" |");
         }
         // Pad missing cells
@@ -408,6 +417,63 @@ pub fn html_table_to_markdown(table_html: &str) -> String {
     }
 
     output
+}
+
+const MAX_MARKDOWN_TABLE_CELLS: usize = 2_000;
+const MAX_MARKDOWN_TABLE_TEXT_BYTES: usize = 200_000;
+
+/// Prepare extracted HTML for Markdown conversion.
+///
+/// Normal tables are left intact. Nested or very large tables are flattened before
+/// conversion to avoid pathological GFM table padding in downstream renderers.
+#[must_use]
+pub(crate) fn prepare_html_for_markdown(html: &str) -> String {
+    if !html.contains("<table") {
+        return html.to_string();
+    }
+
+    use dom_query::{Document, Selection};
+
+    let doc = Document::from(html);
+
+    // Nested tables inside cells make table renderers treat the whole child table
+    // as one cell, then pad every row to that huge width. Flatten them first.
+    let nested_tables = doc.select("td table, th table").nodes().to_vec();
+    for node in nested_tables.into_iter().rev() {
+        let table = Selection::from(node);
+        replace_selection_with_compact_block(&table);
+    }
+
+    // Keep ordinary tables, but cap very large tables. This prevents unbounded
+    // allocations for legacy table-heavy pages while preserving their text.
+    let tables = doc.select("table").nodes().to_vec();
+    for node in tables.into_iter().rev() {
+        let table = Selection::from(node);
+        let cell_count = table.select("td, th").length();
+        let text_len = table.text().len();
+        if cell_count > MAX_MARKDOWN_TABLE_CELLS || text_len > MAX_MARKDOWN_TABLE_TEXT_BYTES {
+            replace_selection_with_compact_block(&table);
+        }
+    }
+
+    doc.html().to_string()
+}
+
+fn replace_selection_with_compact_block(selection: &dom_query::Selection<'_>) {
+    let text = compact_text(&selection.text());
+    let escaped = escape_html_text(&text);
+    selection.replace_with_html(format!("<div>{escaped}</div>"));
+}
+
+fn compact_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn escape_html_text(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -527,8 +593,14 @@ mod tests {
         let result = post_process_markdown(input);
         eprintln!("Input:  {input}");
         eprintln!("Result: {result}");
-        assert!(result.contains("**bold**"), "Expected **bold** but got: {result}");
-        assert!(result.contains("*italic*"), "Expected *italic* but got: {result}");
+        assert!(
+            result.contains("**bold**"),
+            "Expected **bold** but got: {result}"
+        );
+        assert!(
+            result.contains("*italic*"),
+            "Expected *italic* but got: {result}"
+        );
     }
 
     #[test]

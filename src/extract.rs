@@ -14,10 +14,9 @@ use crate::metadata;
 use crate::options::Options;
 use crate::page_type;
 use crate::patterns::{
-    ADVERTISEMENT_CLASS, ARTICLE_SELECTOR, BOILERPLATE_CLASS,
-    BOILERPLATE_CLASS_NO_COMMENTS, COMMENT_CLASS,
-    COMMENT_ID, LINE_WHITESPACE, MAIN_SELECTOR, MULTIPLE_NEWLINES,
-    NAVIGATION_CLASS, WHITESPACE_NORMALIZE,
+    ADVERTISEMENT_CLASS, ARTICLE_SELECTOR, BOILERPLATE_CLASS, BOILERPLATE_CLASS_NO_COMMENTS,
+    COMMENT_CLASS, COMMENT_ID, LINE_WHITESPACE, MAIN_SELECTOR, MULTIPLE_NEWLINES, NAVIGATION_CLASS,
+    WHITESPACE_NORMALIZE,
 };
 
 use std::cell::Cell;
@@ -27,21 +26,39 @@ use std::cell::Cell;
 thread_local! {
     static COMMENTS_ARE_CONTENT: Cell<bool> = const { Cell::new(false) };
 }
-use crate::selector;
 use crate::result::{ExtractResult, ImageData};
+use crate::selector;
 use crate::url_utils::{extract_filename, filenames_match};
 
 /// Main entry point for content extraction.
 #[allow(clippy::unnecessary_wraps)]
 pub(crate) fn extract_content(html: &str, options: &Options) -> Result<ExtractResult> {
     if cfg!(debug_assertions) {
-        eprintln!("DEBUG: Starting content extraction (HTML length: {} chars)", html.len());
+        eprintln!(
+            "DEBUG: Starting content extraction (HTML length: {} chars)",
+            html.len()
+        );
     }
+
+    let input_cap = options.max_extracted_len.saturating_mul(2).max(1_048_576);
+    let truncated_html;
+    let (html, input_truncated_to) = if html.len() > input_cap {
+        let truncate_at = floor_char_boundary(html, input_cap);
+        truncated_html = html[..truncate_at].to_string();
+        (truncated_html.as_str(), Some(truncate_at))
+    } else {
+        (html, None)
+    };
 
     // Parse HTML document
     let document = Document::from(html);
 
     let mut warnings = Vec::new();
+    if let Some(truncate_at) = input_truncated_to {
+        warnings.push(format!(
+            "Input HTML truncated to {truncate_at} bytes before extraction"
+        ));
+    }
 
     // Extract metadata first (works on full document before cleaning)
     // Uses the metadata module which provides:
@@ -95,7 +112,10 @@ pub(crate) fn extract_content(html: &str, options: &Options) -> Result<ExtractRe
     metadata.page_type = Some(detected_page_type.as_str().to_string());
 
     if cfg!(debug_assertions) {
-        eprintln!("DEBUG: Page type: {} (confidence: {:?})", detected_page_type, classification_confidence);
+        eprintln!(
+            "DEBUG: Page type: {} (confidence: {:?})",
+            detected_page_type, classification_confidence
+        );
     }
 
     if cfg!(debug_assertions) {
@@ -117,7 +137,9 @@ pub(crate) fn extract_content(html: &str, options: &Options) -> Result<ExtractRe
     // This is more reliable than DOM-based extraction for sites that use it.
     const MIN_STRUCTURED_BODY_LEN: usize = 500; // Require substantial content
     let json_ld_body = fallback::extract_json_ld_article_body(&document);
-    let use_json_ld = json_ld_body.as_ref().is_some_and(|body| body.chars().count() >= MIN_STRUCTURED_BODY_LEN);
+    let use_json_ld = json_ld_body
+        .as_ref()
+        .is_some_and(|body| body.chars().count() >= MIN_STRUCTURED_BODY_LEN);
 
     // Extract JSON-LD Product description (before cleaning removes scripts)
     let json_ld_product_desc = if detected_page_type == page_type::PageType::Product {
@@ -129,7 +151,9 @@ pub(crate) fn extract_content(html: &str, options: &Options) -> Result<ExtractRe
     // Fix 10: Try Discourse forum extraction (data-preloaded attribute)
     // Discourse forums use client-side rendering and embed content in a hidden div.
     let discourse_body = fallback::extract_discourse_content(&document);
-    let use_discourse = discourse_body.as_ref().is_some_and(|body| body.chars().count() >= MIN_STRUCTURED_BODY_LEN);
+    let use_discourse = discourse_body
+        .as_ref()
+        .is_some_and(|body| body.chars().count() >= MIN_STRUCTURED_BODY_LEN);
 
     // Get extraction profile for detected page type
     let profile = detected_page_type.extraction_profile();
@@ -156,7 +180,12 @@ pub(crate) fn extract_content(html: &str, options: &Options) -> Result<ExtractRe
     // Find and extract main content (graceful degradation on failure)
     // If we have substantial JSON-LD content, still run DOM extraction but compare results
     let page_title = metadata.title.as_deref();
-    let (mut content_text, mut content_html) = match extract_main_content_with_profile(&document, options, page_title, profile.content_selectors) {
+    let (mut content_text, mut content_html) = match extract_main_content_with_profile(
+        &document,
+        options,
+        page_title,
+        profile.content_selectors,
+    ) {
         Ok((text, html)) => (text, html),
         Err(Error::NoContent) => {
             warnings.push("Content extraction failed - no main content found".to_string());
@@ -198,12 +227,22 @@ pub(crate) fn extract_content(html: &str, options: &Options) -> Result<ExtractRe
         // Get first ~100 chars safely (on char boundary)
         let first_100: String = lower.chars().take(100).collect();
         // Count navigation keywords in first 100 chars
-        let nav_keywords = ["home", "about", "contact", "links", "menu", "search", "login"];
-        let nav_count = nav_keywords.iter().filter(|k| first_100.contains(*k)).count();
+        let nav_keywords = [
+            "home", "about", "contact", "links", "menu", "search", "login",
+        ];
+        let nav_count = nav_keywords
+            .iter()
+            .filter(|k| first_100.contains(*k))
+            .count();
         nav_count >= 3 // 3+ nav keywords at start suggests wrong content
     };
 
-    if options.use_fallback_extraction && (content_len < min_extracted_len || under_extracted || insufficient_words || looks_like_navigation) {
+    if options.use_fallback_extraction
+        && (content_len < min_extracted_len
+            || under_extracted
+            || insufficient_words
+            || looks_like_navigation)
+    {
         // Use doc_backup (pre-cleaning) for fallback - critical for pages where
         // content is inside <form> tags that get removed by doc_cleaning
         // Pass content_html for proper structural comparison in candidate_is_usable
@@ -293,7 +332,8 @@ pub(crate) fn extract_content(html: &str, options: &Options) -> Result<ExtractRe
         let current_len = content_text.chars().count();
         let desc_len = product_desc.chars().count();
         let desc_words: std::collections::HashSet<&str> = product_desc.split_whitespace().collect();
-        let content_words: std::collections::HashSet<&str> = content_text.split_whitespace().collect();
+        let content_words: std::collections::HashSet<&str> =
+            content_text.split_whitespace().collect();
         let overlap = desc_words.intersection(&content_words).count();
         let overlap_ratio = if !desc_words.is_empty() {
             overlap as f64 / desc_words.len() as f64
@@ -326,7 +366,11 @@ pub(crate) fn extract_content(html: &str, options: &Options) -> Result<ExtractRe
     } else {
         None
     };
-    let structured_source = if use_discourse { "Discourse" } else { "JSON-LD" };
+    let structured_source = if use_discourse {
+        "Discourse"
+    } else {
+        "JSON-LD"
+    };
 
     if let Some(structured_text) = structured_body {
         let structured_len = structured_text.chars().count();
@@ -342,8 +386,10 @@ pub(crate) fn extract_content(html: &str, options: &Options) -> Result<ExtractRe
             let lower = content_text.to_lowercase();
             let first_200: String = lower.chars().take(200).collect();
             // Check for cookie/consent/navigation patterns
-            first_200.contains("cookie") || first_200.contains("consent")
-                || first_200.contains("©") || first_200.contains("copyright")
+            first_200.contains("cookie")
+                || first_200.contains("consent")
+                || first_200.contains("©")
+                || first_200.contains("copyright")
                 || (first_200.matches('\n').count() > first_200.split_whitespace().count() / 3)
         };
 
@@ -392,7 +438,10 @@ pub(crate) fn extract_content(html: &str, options: &Options) -> Result<ExtractRe
     if cfg!(debug_assertions) {
         eprintln!("DEBUG: Extraction summary:");
         eprintln!("  Content text: {} chars", content_text.len());
-        eprintln!("  Comments: {} chars", comments_text.as_ref().map_or(0, std::string::String::len));
+        eprintln!(
+            "  Comments: {} chars",
+            comments_text.as_ref().map_or(0, std::string::String::len)
+        );
         eprintln!("  Images: {}", images.len());
         eprintln!("  Warnings: {}", warnings.len());
     }
@@ -434,8 +483,10 @@ pub(crate) fn extract_content(html: &str, options: &Options) -> Result<ExtractRe
                 .preserve_tables(options.include_tables)
                 .escape_special_chars(true);
 
+            let safe_html = crate::markdown::prepare_html_for_markdown(html);
+
             // Convert HTML to Markdown (quick_html2md handles tables and escaping natively)
-            let markdown = html_to_markdown_with_options(html, &md_options);
+            let markdown = html_to_markdown_with_options(&safe_html, &md_options);
 
             result.content_markdown = Some(markdown);
         }
@@ -449,7 +500,10 @@ pub(crate) fn extract_content(html: &str, options: &Options) -> Result<ExtractRe
 
     if cfg!(debug_assertions) {
         if let Ok(ref res) = final_result {
-            eprintln!("DEBUG: Extraction complete! Final content: {} chars", res.content_text.len());
+            eprintln!(
+                "DEBUG: Extraction complete! Final content: {} chars",
+                res.content_text.len()
+            );
         }
     }
 
@@ -537,8 +591,15 @@ fn try_collect_repeated_items_with_threshold(doc: &Document, min_words: usize) -
 
     // Search containers that likely hold repeated items
     let container_selectors = [
-        "main", "[role='main']", "#content", ".content",
-        "section", ".feed", ".stream", ".listing", ".items",
+        "main",
+        "[role='main']",
+        "#content",
+        ".content",
+        "section",
+        ".feed",
+        ".stream",
+        ".listing",
+        ".items",
     ];
 
     for container_sel in &container_selectors {
@@ -786,8 +847,8 @@ fn compute_extraction_quality_ml(
     let unique_words: std::collections::HashSet<&str> = words.iter().copied().collect();
 
     // Compute heuristic confidence as one of the 27 ML features
-    let heuristic_conf = compute_extraction_quality_heuristic(
-        content_text, content_html, html_len, page_type);
+    let heuristic_conf =
+        compute_extraction_quality_heuristic(content_text, content_html, html_len, page_type);
 
     let mut f = [0.0f64; web_page_classifier::N_QUALITY_FEATURES];
 
@@ -797,41 +858,91 @@ fn compute_extraction_quality_ml(
     f[3] = unique_words.len() as f64 / word_count.max(1) as f64;
     f[4] = if word_count > 0 {
         words.iter().map(|w| w.len() as f64).sum::<f64>() / word_count as f64
-    } else { 0.0 };
+    } else {
+        0.0
+    };
 
     let sentences: Vec<&str> = content_text
         .split(|c: char| c == '.' || c == '!' || c == '?' || c == '\n')
-        .map(str::trim).filter(|s| s.len() > 10).collect();
+        .map(str::trim)
+        .filter(|s| s.len() > 10)
+        .collect();
     f[5] = sentences.len() as f64;
     f[6] = if !sentences.is_empty() {
         sentences.iter().map(|s| s.len() as f64).sum::<f64>() / sentences.len() as f64
-    } else { 0.0 };
+    } else {
+        0.0
+    };
     let unique_sent: std::collections::HashSet<&str> = sentences.iter().copied().collect();
     f[7] = unique_sent.len() as f64 / sentences.len().max(1) as f64;
 
-    let paragraphs: Vec<&str> = content_text.split("\n\n")
-        .map(str::trim).filter(|p| p.len() > 20).collect();
+    let paragraphs: Vec<&str> = content_text
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|p| p.len() > 20)
+        .collect();
     f[8] = paragraphs.len() as f64;
     f[9] = if !paragraphs.is_empty() {
         paragraphs.iter().map(|p| p.len() as f64).sum::<f64>() / paragraphs.len() as f64
-    } else { 0.0 };
+    } else {
+        0.0
+    };
 
-    let link_count = content_text.matches("http://").count() + content_text.matches("https://").count();
+    let link_count =
+        content_text.matches("http://").count() + content_text.matches("https://").count();
     f[10] = link_count as f64;
     f[11] = link_count as f64 / word_count.max(1) as f64;
 
     let first_500 = &content_lower[..content_lower.len().min(500)];
-    let bp_kws = ["cookie", "consent", "subscribe", "newsletter", "sign up",
-                  "skip to", "copyright", "privacy", "terms", "accept"];
+    let bp_kws = [
+        "cookie",
+        "consent",
+        "subscribe",
+        "newsletter",
+        "sign up",
+        "skip to",
+        "copyright",
+        "privacy",
+        "terms",
+        "accept",
+    ];
     f[12] = bp_kws.iter().filter(|kw| first_500.contains(*kw)).count() as f64;
 
-    f[13] = if matches!(page_type, page_type::PageType::Article) { 1.0 } else { 0.0 };
-    f[14] = if matches!(page_type, page_type::PageType::Category) { 1.0 } else { 0.0 };
-    f[15] = if matches!(page_type, page_type::PageType::Documentation) { 1.0 } else { 0.0 };
-    f[16] = if matches!(page_type, page_type::PageType::Forum) { 1.0 } else { 0.0 };
-    f[17] = if matches!(page_type, page_type::PageType::Listing) { 1.0 } else { 0.0 };
-    f[18] = if matches!(page_type, page_type::PageType::Product) { 1.0 } else { 0.0 };
-    f[19] = if matches!(page_type, page_type::PageType::Service) { 1.0 } else { 0.0 };
+    f[13] = if matches!(page_type, page_type::PageType::Article) {
+        1.0
+    } else {
+        0.0
+    };
+    f[14] = if matches!(page_type, page_type::PageType::Category) {
+        1.0
+    } else {
+        0.0
+    };
+    f[15] = if matches!(page_type, page_type::PageType::Documentation) {
+        1.0
+    } else {
+        0.0
+    };
+    f[16] = if matches!(page_type, page_type::PageType::Forum) {
+        1.0
+    } else {
+        0.0
+    };
+    f[17] = if matches!(page_type, page_type::PageType::Listing) {
+        1.0
+    } else {
+        0.0
+    };
+    f[18] = if matches!(page_type, page_type::PageType::Product) {
+        1.0
+    } else {
+        0.0
+    };
+    f[19] = if matches!(page_type, page_type::PageType::Service) {
+        1.0
+    } else {
+        0.0
+    };
 
     let expected_median = match page_type {
         page_type::PageType::Article => 10228.0,
@@ -846,7 +957,8 @@ fn compute_extraction_quality_ml(
     f[21] = html_len as f64;
     f[22] = content_len as f64 / html_len.max(1) as f64;
 
-    let og_desc = doc.select(r#"meta[property="og:description"]"#)
+    let og_desc = doc
+        .select(r#"meta[property="og:description"]"#)
         .attr("content")
         .unwrap_or_default();
     if og_desc.len() > 20 {
@@ -860,7 +972,11 @@ fn compute_extraction_quality_ml(
     }
 
     f[24] = doc.select("script").length() as f64;
-    f[25] = if doc.select(r#"script[type="application/ld+json"]"#).length() > 0 { 1.0 } else { 0.0 };
+    f[25] = if doc.select(r#"script[type="application/ld+json"]"#).length() > 0 {
+        1.0
+    } else {
+        0.0
+    };
 
     if word_count > 50 {
         let mut bigram_counts = std::collections::HashMap::new();
@@ -967,9 +1083,18 @@ fn compute_extraction_quality_heuristic(
     let first_200: String = content_text.chars().take(200).collect();
     let first_lower = first_200.to_lowercase();
     let boilerplate_keywords = [
-        "cookie", "consent", "subscribe", "newsletter", "sign up",
-        "skip to content", "skip to main", "©", "copyright",
-        "privacy policy", "terms of", "accept all",
+        "cookie",
+        "consent",
+        "subscribe",
+        "newsletter",
+        "sign up",
+        "skip to content",
+        "skip to main",
+        "©",
+        "copyright",
+        "privacy policy",
+        "terms of",
+        "accept all",
     ];
     let bp_count = boilerplate_keywords
         .iter()
@@ -1043,7 +1168,13 @@ fn try_fallback_extraction(
     let result_sel = result_doc.select("body");
 
     // Check if external result is usable using candidateIsUsable heuristics
-    if fallback::candidate_is_usable(&result_sel, &extracted_sel, result_len, current_len, options) {
+    if fallback::candidate_is_usable(
+        &result_sel,
+        &extracted_sel,
+        result_len,
+        current_len,
+        options,
+    ) {
         let html = dom::outer_html(&result_sel).to_string();
         if result_len >= min_size {
             // Substantial improvement, use it
@@ -1112,7 +1243,8 @@ fn apply_final_validations(
 
     // Apply maximum length limit
     if result.content_text.len() > options.max_extracted_len {
-        result.content_text.truncate(options.max_extracted_len);
+        let truncate_at = floor_char_boundary(&result.content_text, options.max_extracted_len);
+        result.content_text.truncate(truncate_at);
         result.warnings.push(format!(
             "Content truncated to max length: {}",
             options.max_extracted_len
@@ -1135,6 +1267,18 @@ fn apply_final_validations(
     Ok(result)
 }
 
+fn floor_char_boundary(text: &str, max_len: usize) -> usize {
+    if max_len >= text.len() {
+        return text.len();
+    }
+
+    let mut len = max_len;
+    while len > 0 && !text.is_char_boundary(len) {
+        len -= 1;
+    }
+    len
+}
+
 /// Strip sections from content HTML that are link-dense navigation boilerplate.
 ///
 /// Strip navigation boilerplate from extracted content using multi-signal detection.
@@ -1150,7 +1294,11 @@ fn apply_final_validations(
 fn strip_link_dense_sections(html: &str) -> String {
     let doc = Document::from(html);
     let body = doc.select("body");
-    let root = if body.exists() { body } else { doc.select("*").first() };
+    let root = if body.exists() {
+        body
+    } else {
+        doc.select("*").first()
+    };
 
     let original_text_len = crate::dom::text_content(&root).trim().len();
     let mut changed = false;
@@ -1302,7 +1450,9 @@ fn try_length_based_fallback(
             // Skip nav, header, footer, aside, etc.
             if let Some(tag) = node.node_name() {
                 let tag_lower = tag.to_lowercase();
-                if ["nav", "header", "footer", "aside", "script", "style"].contains(&tag_lower.as_str()) {
+                if ["nav", "header", "footer", "aside", "script", "style"]
+                    .contains(&tag_lower.as_str())
+                {
                     continue;
                 }
             }
@@ -1346,16 +1496,30 @@ fn try_length_based_fallback(
         if cfg!(debug_assertions) {
             eprintln!("rs-trafilatura: fallback successful! Improved from {primary_text_len} to {best_len} chars");
         }
-        Some((best_text, if best_html.is_empty() { None } else { Some(best_html) }))
+        Some((
+            best_text,
+            if best_html.is_empty() {
+                None
+            } else {
+                Some(best_html)
+            },
+        ))
     } else {
         if cfg!(debug_assertions) {
-            eprintln!("rs-trafilatura: fallback did not improve results (best was {best_len} chars)");
+            eprintln!(
+                "rs-trafilatura: fallback did not improve results (best was {best_len} chars)"
+            );
         }
         None
     }
 }
 
-fn extract_main_content_with_profile(doc: &Document, options: &Options, page_title: Option<&str>, profile_selectors: &[&str]) -> Result<(String, Option<String>)> {
+fn extract_main_content_with_profile(
+    doc: &Document,
+    options: &Options,
+    page_title: Option<&str>,
+    profile_selectors: &[&str],
+) -> Result<(String, Option<String>)> {
     if cfg!(debug_assertions) {
         eprintln!("DEBUG: Starting main content extraction");
     }
@@ -1411,7 +1575,8 @@ fn extract_main_content_with_profile(doc: &Document, options: &Options, page_tit
                         if dom::tag_name(&ancestor).map_or(false, |t| t == "body" || t == "html") {
                             break;
                         }
-                        let anc_text = extract_filtered_text_with_title(&ancestor, options, page_title);
+                        let anc_text =
+                            extract_filtered_text_with_title(&ancestor, options, page_title);
                         let anc_len = anc_text.chars().count();
                         if anc_len > text_len * 2 {
                             text = anc_text;
@@ -1470,9 +1635,13 @@ fn extract_main_content_with_profile(doc: &Document, options: &Options, page_tit
 
     if extracted_from_content_node {
         if let Some(node) = &content_node {
-            if let Some((merged_text, merged_html)) =
-                maybe_merge_split_article_bodies(node, options, &text, &html, used_relaxed_filtering)
-            {
+            if let Some((merged_text, merged_html)) = maybe_merge_split_article_bodies(
+                node,
+                options,
+                &text,
+                &html,
+                used_relaxed_filtering,
+            ) {
                 text = merged_text;
                 html = merged_html;
             }
@@ -1503,7 +1672,10 @@ fn extract_main_content_with_profile(doc: &Document, options: &Options, page_tit
     let content_html = if html.is_empty() { None } else { Some(html) };
 
     if cfg!(debug_assertions) {
-        eprintln!("DEBUG: Extraction complete! Final text length: {} chars", text.len());
+        eprintln!(
+            "DEBUG: Extraction complete! Final text length: {} chars",
+            text.len()
+        );
     }
 
     Ok((text, content_html))
@@ -1560,7 +1732,10 @@ fn find_nearest_article_ancestor<'a>(node: &Selection<'a>) -> Option<Selection<'
     None
 }
 
-fn find_split_body_candidates<'a>(article: &Selection<'a>, signature: SplitBodySignature) -> Vec<Selection<'a>> {
+fn find_split_body_candidates<'a>(
+    article: &Selection<'a>,
+    signature: SplitBodySignature,
+) -> Vec<Selection<'a>> {
     let token = split_body_signature_token(signature);
     let mut out: Vec<Selection<'a>> = Vec::new();
     let mut kept_nodes: Vec<(dom_query::NodeId, usize)> = Vec::new();
@@ -1669,7 +1844,6 @@ fn maybe_merge_split_article_bodies(
     let mut merged_html_parts: Vec<String> = Vec::new();
 
     for chunk in candidates {
-
         if !is_viable_split_body_chunk(&chunk) {
             continue;
         }
@@ -1818,17 +1992,24 @@ fn matches_target_language(doc: &Document, el: &Selection, target_lang: Option<&
 }
 
 /// Finds the main content node using semantic selectors.
-#[allow(dead_code)]  // Used for backward compatibility
+#[allow(dead_code)] // Used for backward compatibility
 fn find_main_content_node(doc: &Document) -> Option<Selection<'_>> {
     find_main_content_node_with_options(doc, &Options::default())
 }
 
 /// Finds the main content node using semantic selectors with options.
-fn find_main_content_node_with_options<'a>(doc: &'a Document, options: &Options) -> Option<Selection<'a>> {
+fn find_main_content_node_with_options<'a>(
+    doc: &'a Document,
+    options: &Options,
+) -> Option<Selection<'a>> {
     find_main_content_node_with_profile(doc, options, &[])
 }
 
-fn find_main_content_node_with_profile<'a>(doc: &'a Document, options: &Options, profile_selectors: &[&str]) -> Option<Selection<'a>> {
+fn find_main_content_node_with_profile<'a>(
+    doc: &'a Document,
+    options: &Options,
+    profile_selectors: &[&str],
+) -> Option<Selection<'a>> {
     let body = doc.select("body");
     if body.length() == 0 {
         return None;
@@ -1909,8 +2090,10 @@ fn find_content_node_bottom_up<'a>(doc: &'a Document) -> Option<Selection<'a>> {
     }
 
     // Collect all container elements and assign indices
-    let containers: Vec<_> = doc.select("div, section, article, main, td, blockquote")
-        .nodes().to_vec();
+    let containers: Vec<_> = doc
+        .select("div, section, article, main, td, blockquote")
+        .nodes()
+        .to_vec();
 
     if containers.is_empty() {
         return None;
@@ -1935,8 +2118,21 @@ fn find_content_node_bottom_up<'a>(doc: &'a Document) -> Option<Selection<'a>> {
     // Score every paragraph-like element and propagate upward.
     // Also include <div> elements that have no block children (div-as-paragraph).
     // Many modern pages use <div> instead of <p> for text blocks.
-    let block_tags = ["div", "p", "pre", "section", "article", "table",
-                      "ul", "ol", "blockquote", "form", "header", "footer", "nav"];
+    let block_tags = [
+        "div",
+        "p",
+        "pre",
+        "section",
+        "article",
+        "table",
+        "ul",
+        "ol",
+        "blockquote",
+        "form",
+        "header",
+        "footer",
+        "nav",
+    ];
 
     for node in doc.select("p, pre, div").nodes() {
         let el = Selection::from(*node);
@@ -1998,7 +2194,10 @@ fn find_content_node_bottom_up<'a>(doc: &'a Document) -> Option<Selection<'a>> {
         if text_len == 0 {
             continue;
         }
-        let link_text_len: usize = sel.select("a").nodes().iter()
+        let link_text_len: usize = sel
+            .select("a")
+            .nodes()
+            .iter()
             .map(|n| Selection::from(*n).text().trim().len())
             .sum();
         let link_density = link_text_len as f64 / text_len as f64;
@@ -2011,7 +2210,9 @@ fn find_content_node_bottom_up<'a>(doc: &'a Document) -> Option<Selection<'a>> {
     }
 
     // Find the container with the highest score
-    let (best_idx, &best_score) = scores.iter().enumerate()
+    let (best_idx, &best_score) = scores
+        .iter()
+        .enumerate()
         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))?;
 
     if best_score < 10.0 {
@@ -2040,16 +2241,19 @@ fn class_score(el: &Selection<'_>) -> f64 {
     let combined = format!("{class} {id}");
 
     // Positive signals
-    for pat in ["article", "body", "content", "entry", "main", "page",
-                "post", "text", "blog", "story"] {
+    for pat in [
+        "article", "body", "content", "entry", "main", "page", "post", "text", "blog", "story",
+    ] {
         if combined.contains(pat) {
             score += 25.0;
         }
     }
 
     // Negative signals
-    for pat in ["comment", "meta", "footer", "footnote", "sidebar",
-                "widget", "nav", "menu", "header", "banner", "social"] {
+    for pat in [
+        "comment", "meta", "footer", "footnote", "sidebar", "widget", "nav", "menu", "header",
+        "banner", "social",
+    ] {
         if combined.contains(pat) {
             score -= 25.0;
         }
@@ -2059,13 +2263,16 @@ fn class_score(el: &Selection<'_>) -> f64 {
 }
 
 #[allow(clippy::too_many_lines)]
-#[allow(dead_code)]  // Used for backward compatibility
+#[allow(dead_code)] // Used for backward compatibility
 fn find_heuristic_content_node(doc: &Document) -> Option<Selection<'_>> {
     find_heuristic_content_node_with_options(doc, &Options::default())
 }
 
 #[allow(clippy::too_many_lines)]
-fn find_heuristic_content_node_with_options<'a>(doc: &'a Document, options: &Options) -> Option<Selection<'a>> {
+fn find_heuristic_content_node_with_options<'a>(
+    doc: &'a Document,
+    options: &Options,
+) -> Option<Selection<'a>> {
     let body = doc.select("body");
     if body.length() == 0 {
         return None;
@@ -2079,7 +2286,8 @@ fn find_heuristic_content_node_with_options<'a>(doc: &'a Document, options: &Opt
     };
     // Don't use body as candidate when language filtering is active
     // (body contains all languages, would defeat filtering purpose)
-    let allow_body_candidate = body_text_len > 0 && body_text_len <= 500 && options.target_language.is_none();
+    let allow_body_candidate =
+        body_text_len > 0 && body_text_len <= 500 && options.target_language.is_none();
 
     let mut best_score: i64 = 0;
     let mut best: Option<Selection> = None;
@@ -2147,11 +2355,11 @@ fn find_heuristic_content_node_with_options<'a>(doc: &'a Document, options: &Opt
     // Note: If both favor_precision and favor_recall are true,
     // precision takes precedence (stricter threshold wins)
     let min_score = if options.favor_precision {
-        5000  // Higher threshold for precision mode
+        5000 // Higher threshold for precision mode
     } else if options.favor_recall {
-        500   // Lower threshold for recall mode
+        500 // Lower threshold for recall mode
     } else {
-        1000  // Default threshold
+        1000 // Default threshold
     };
 
     if best_score >= min_score {
@@ -2303,7 +2511,11 @@ fn extract_filtered_text(root: &Selection, options: &Options) -> String {
     extract_filtered_text_inner(root, options, true, None)
 }
 
-fn extract_filtered_text_with_title(root: &Selection, options: &Options, page_title: Option<&str>) -> String {
+fn extract_filtered_text_with_title(
+    root: &Selection,
+    options: &Options,
+    page_title: Option<&str>,
+) -> String {
     extract_filtered_text_inner(root, options, true, page_title)
 }
 
@@ -2324,7 +2536,9 @@ fn tendril_tag_matches(tag_name: &tendril::StrTendril, targets: &[&str]) -> bool
 /// Using a slice is faster than HashSet for small, fixed tag lists.
 #[inline]
 fn excluded_tag_names() -> &'static [&'static str] {
-    &["script", "style", "noscript", "nav", "aside", "iframe", "svg", "ins"]
+    &[
+        "script", "style", "noscript", "nav", "aside", "iframe", "svg", "ins",
+    ]
 }
 
 #[allow(clippy::too_many_lines)]
@@ -2407,7 +2621,9 @@ fn extract_filtered_text_inner(
                         while let Some(parent) = cur {
                             // Check if this ancestor (including root_node) is article/main
                             if let Some(pname) = parent.node_name() {
-                                if pname.eq_ignore_ascii_case("article") || pname.eq_ignore_ascii_case("main") {
+                                if pname.eq_ignore_ascii_case("article")
+                                    || pname.eq_ignore_ascii_case("main")
+                                {
                                     found_article_or_main = true;
                                     break;
                                 }
@@ -2428,9 +2644,8 @@ fn extract_filtered_text_inner(
                     if tag_name.eq_ignore_ascii_case("footer") {
                         // Always exclude footer if it has boilerplate classes
                         let sel = Selection::from(anc);
-                        let has_boilerplate_class = sel
-                            .attr("class")
-                            .is_some_and(|c| is_boilerplate(&c));
+                        let has_boilerplate_class =
+                            sel.attr("class").is_some_and(|c| is_boilerplate(&c));
 
                         if has_boilerplate_class {
                             excluded = true;
@@ -2443,7 +2658,9 @@ fn extract_filtered_text_inner(
                         while let Some(parent) = cur {
                             // Check if this ancestor (including root_node) is article/main
                             if let Some(pname) = parent.node_name() {
-                                if pname.eq_ignore_ascii_case("article") || pname.eq_ignore_ascii_case("main") {
+                                if pname.eq_ignore_ascii_case("article")
+                                    || pname.eq_ignore_ascii_case("main")
+                                {
                                     found_article_or_main = true;
                                     break;
                                 }
@@ -2516,7 +2733,9 @@ fn extract_filtered_text_inner(
         if node.is_element() {
             // EPIC-06: Extract tag name once to avoid duplicate calls
             let tag_name = node.node_name();
-            let is_table = tag_name.as_ref().is_some_and(|t| t.eq_ignore_ascii_case("table"));
+            let is_table = tag_name
+                .as_ref()
+                .is_some_and(|t| t.eq_ignore_ascii_case("table"));
             let is_div_ul_ol = tag_name.as_ref().is_some_and(|t| {
                 t.eq_ignore_ascii_case("div")
                     || t.eq_ignore_ascii_case("ul")
@@ -2568,7 +2787,10 @@ fn extract_filtered_text_inner(
                 // Check for heading elements with boilerplate text content
                 let is_heading = tag_name.len() == 2
                     && tag_name.starts_with('h')
-                    && tag_name.chars().nth(1).map_or(false, |c| c.is_ascii_digit());
+                    && tag_name
+                        .chars()
+                        .nth(1)
+                        .map_or(false, |c| c.is_ascii_digit());
 
                 if is_heading {
                     // Get full text content of the heading to check for boilerplate
@@ -2626,7 +2848,9 @@ fn extract_filtered_text_inner(
 
                     // Only filter if paragraph is short and matches boilerplate patterns
                     // This prevents filtering legitimate content that mentions these words
-                    if p_text_trimmed.len() < 50 && html_processing::is_share_button_text(p_text_trimmed) {
+                    if p_text_trimmed.len() < 50
+                        && html_processing::is_share_button_text(p_text_trimmed)
+                    {
                         skip_depths.push(depth);
                         continue;
                     }
@@ -2640,7 +2864,9 @@ fn extract_filtered_text_inner(
                     let div_text_trimmed = div_text.trim();
 
                     // Only filter divs with very short text that matches byline/metadata patterns
-                    if div_text_trimmed.len() < 80 && html_processing::is_share_button_text(div_text_trimmed) {
+                    if div_text_trimmed.len() < 80
+                        && html_processing::is_share_button_text(div_text_trimmed)
+                    {
                         skip_depths.push(depth);
                         continue;
                     }
@@ -2653,7 +2879,8 @@ fn extract_filtered_text_inner(
                     || is_heading
                 {
                     out.push_str("\n\n");
-                } else if tag_name.eq_ignore_ascii_case("br") || tag_name.eq_ignore_ascii_case("li") {
+                } else if tag_name.eq_ignore_ascii_case("br") || tag_name.eq_ignore_ascii_case("li")
+                {
                     out.push('\n');
                 }
             }
@@ -2720,7 +2947,10 @@ fn push_filtered_html_children(
             if tag == "footer" && !inside_article_or_main {
                 continue;
             }
-            if matches!(tag.as_str(), "nav" | "aside" | "script" | "style" | "noscript" | "iframe" | "svg" | "ins") {
+            if matches!(
+                tag.as_str(),
+                "nav" | "aside" | "script" | "style" | "noscript" | "iframe" | "svg" | "ins"
+            ) {
                 continue;
             }
 
@@ -2754,7 +2984,8 @@ fn push_filtered_html_children(
                 }
             }
 
-            let next_inside_article_or_main = inside_article_or_main || matches!(tag.as_str(), "article" | "main");
+            let next_inside_article_or_main =
+                inside_article_or_main || matches!(tag.as_str(), "article" | "main");
 
             if inside_layout_table
                 && matches!(
@@ -2796,8 +3027,7 @@ fn push_filtered_html_children(
 
             if matches!(
                 tag.as_str(),
-                "p"
-                    | "div"
+                "p" | "div"
                     | "section"
                     | "article"
                     | "main"
@@ -2831,7 +3061,8 @@ fn push_filtered_html_children(
                     | "caption"
                     | "colgroup"
                     | "col"
-            ) {
+            ) || is_allowed_media_html_tag(&tag, options)
+            {
                 out.push('<');
                 out.push_str(&tag);
                 if tag == "a" && options.include_links {
@@ -2860,20 +3091,48 @@ fn push_filtered_html_children(
                         out.push('"');
                     }
                 }
+                if tag == "video" && options.include_videos {
+                    push_optional_html_attributes(
+                        out,
+                        &el,
+                        &["src", "poster", "controls", "preload", "width", "height"],
+                    );
+                }
+                if tag == "audio" && options.include_audio {
+                    push_optional_html_attributes(out, &el, &["src", "controls", "preload"]);
+                }
+                if tag == "source"
+                    && (options.include_images || options.include_videos || options.include_audio)
+                {
+                    push_optional_html_attributes(
+                        out,
+                        &el,
+                        &["src", "srcset", "type", "media", "sizes"],
+                    );
+                }
+                if tag == "track" && (options.include_videos || options.include_audio) {
+                    push_optional_html_attributes(
+                        out,
+                        &el,
+                        &["src", "kind", "srclang", "label", "default"],
+                    );
+                }
                 out.push('>');
 
-                push_filtered_html_children(
-                    &el,
-                    out,
-                    next_inside_article_or_main,
-                    inside_layout_table,
-                    options,
-                    filter_named_boilerplate,
-                );
+                if !matches!(tag.as_str(), "source" | "track") {
+                    push_filtered_html_children(
+                        &el,
+                        out,
+                        next_inside_article_or_main,
+                        inside_layout_table,
+                        options,
+                        filter_named_boilerplate,
+                    );
 
-                out.push_str("</");
-                out.push_str(&tag);
-                out.push('>');
+                    out.push_str("</");
+                    out.push_str(&tag);
+                    out.push('>');
+                }
             } else if tag == "br" {
                 out.push_str("<br>");
             } else {
@@ -2889,6 +3148,30 @@ fn push_filtered_html_children(
         } else if child_node.is_text() {
             let text = child_node.text();
             out.push_str(&escape_html(&text));
+        }
+    }
+}
+
+fn is_allowed_media_html_tag(tag: &str, options: &Options) -> bool {
+    match tag {
+        "video" => options.include_videos,
+        "audio" => options.include_audio,
+        "source" => options.include_images || options.include_videos || options.include_audio,
+        "track" => options.include_videos || options.include_audio,
+        _ => false,
+    }
+}
+
+fn push_optional_html_attributes(out: &mut String, el: &Selection, attrs: &[&str]) {
+    for attr in attrs {
+        if let Some(value) = el.attr(attr) {
+            out.push(' ');
+            out.push_str(attr);
+            if !value.is_empty() {
+                out.push_str("=\"");
+                out.push_str(&escape_html(&value));
+                out.push('"');
+            }
         }
     }
 }
@@ -2996,14 +3279,14 @@ fn extract_table_text(table: &Selection) -> String {
 
     // Select rows directly from the table selection
     let tr_sel = table.select("tr");
-    
+
     for tr_node in tr_sel.nodes() {
         if total_cells >= MAX_TABLE_CELLS || out.len() >= MAX_TABLE_TEXT_LEN {
             break;
         }
 
         let tr = Selection::from(*tr_node);
-        
+
         let mut row_cells: Vec<String> = Vec::new();
         let mut col: usize = 0;
 
@@ -3033,7 +3316,8 @@ fn extract_table_text(table: &Selection) -> String {
                 }
                 row_cells.push(text.clone());
                 if rowspan_n > 1 {
-                    rowspan[col.saturating_add(i)] = Some((rowspan_n.saturating_sub(1), text.clone()));
+                    rowspan[col.saturating_add(i)] =
+                        Some((rowspan_n.saturating_sub(1), text.clone()));
                 }
             }
 
@@ -3203,13 +3487,31 @@ fn is_false_positive_navigation_token(token: &str) -> bool {
 /// Checks if a class or ID name indicates boilerplate content.
 /// Handles layout/component prefixed tokens by exempting known false positives.
 /// Position words that indicate an actual sidebar (not a theme namespace).
-const SIDEBAR_POSITION_WORDS: &[&str] = &["left", "right", "primary", "secondary", "main", "widget"];
+const SIDEBAR_POSITION_WORDS: &[&str] =
+    &["left", "right", "primary", "secondary", "main", "widget"];
 
 /// Suffixes that indicate an actual author box/bio section (not a taxonomy class like "author-john-doe").
 const AUTHOR_BOX_SUFFIXES: &[&str] = &[
-    "box", "bio", "info", "avatar", "meta", "wrap", "description", "link",
-    "details", "card", "profile", "section", "container", "area", "block",
-    "ul", "category", "pp", "ppma", "boxes",
+    "box",
+    "bio",
+    "info",
+    "avatar",
+    "meta",
+    "wrap",
+    "description",
+    "link",
+    "details",
+    "card",
+    "profile",
+    "section",
+    "container",
+    "area",
+    "block",
+    "ul",
+    "category",
+    "pp",
+    "ppma",
+    "boxes",
 ];
 
 fn is_boilerplate(name: &str) -> bool {
@@ -3394,16 +3696,7 @@ fn extract_images_from_node(
     for img_node in img_sel.nodes() {
         let img = Selection::from(*img_node);
 
-        // Get src URL (try src first, then data-src for lazy loading)
-        let src = img
-            .attr("src")
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .or_else(|| {
-                img.attr("data-src")
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-            });
+        let src = select_best_image_src(&img);
 
         let Some(src) = src else {
             continue;
@@ -3428,7 +3721,7 @@ fn extract_images_from_node(
             src,
             filename,
             alt,
-            caption: None, // No caption for standalone images
+            caption: None,  // No caption for standalone images
             is_hero: false, // Will be set by mark_hero_image
         });
     }
@@ -3460,16 +3753,7 @@ fn extract_image_from_figure(
     };
     let img = Selection::from(*img_node);
 
-    // Get src URL
-    let src = img
-        .attr("src")
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            img.attr("data-src")
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-        });
+    let src = select_best_image_src(&img);
 
     let Some(src) = src else {
         return;
@@ -3502,6 +3786,62 @@ fn extract_image_from_figure(
     });
 }
 
+fn select_best_image_src(img: &Selection<'_>) -> Option<String> {
+    best_srcset_candidate(img.attr("srcset").as_deref())
+        .or_else(|| best_srcset_candidate(img.attr("data-srcset").as_deref()))
+        .or_else(|| {
+            img.attr("src")
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| {
+            img.attr("data-src")
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+}
+
+fn best_srcset_candidate(srcset: Option<&str>) -> Option<String> {
+    let srcset = srcset?.trim();
+    if srcset.is_empty() {
+        return None;
+    }
+
+    let mut best: Option<(String, f64)> = None;
+    for candidate in srcset.split(',') {
+        let mut parts = candidate.split_whitespace();
+        let Some(url) = parts.next() else {
+            continue;
+        };
+        if url.is_empty() {
+            continue;
+        }
+
+        let descriptor = parts.next().unwrap_or_default();
+        let score = parse_srcset_descriptor_score(descriptor).unwrap_or(1.0);
+        if best
+            .as_ref()
+            .is_none_or(|(_, best_score)| score > *best_score)
+        {
+            best = Some((url.to_string(), score));
+        }
+    }
+
+    best.map(|(url, _)| url)
+}
+
+fn parse_srcset_descriptor_score(descriptor: &str) -> Option<f64> {
+    if descriptor.len() < 2 {
+        return None;
+    }
+    if let Some(width) = descriptor.strip_suffix('w') {
+        return width.parse::<f64>().ok();
+    }
+    descriptor
+        .strip_suffix('x')
+        .and_then(|density| density.parse::<f64>().ok())
+}
+
 /// Story 3: Extracts and cleans caption text from a figcaption element.
 fn extract_figcaption(figure: &Selection) -> Option<String> {
     let figcaption_sel = figure.select("figcaption");
@@ -3523,10 +3863,7 @@ fn extract_figcaption(figure: &Selection) -> Option<String> {
 /// Cleans and normalizes caption text.
 fn clean_caption_text(text: &str) -> String {
     // Normalize whitespace: collapse multiple spaces/newlines to single space
-    let cleaned: String = text
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let cleaned: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
 
     cleaned.trim().to_string()
 }
@@ -3566,7 +3903,13 @@ fn mark_hero_image(images: &mut [ImageData], og_image: Option<&str>) {
 }
 
 fn find_comment_section(doc: &Document) -> Option<Selection<'_>> {
-    for id in ["comments", "comment-section", "disqus_thread", "respond", "discussion"] {
+    for id in [
+        "comments",
+        "comment-section",
+        "disqus_thread",
+        "respond",
+        "discussion",
+    ] {
         let sel = format!("#{id}");
         let elements = doc.select(&sel);
         if elements.length() > 0 {
@@ -3721,9 +4064,19 @@ fn strip_navigation_boundaries(text: &str) -> String {
 
     // Patterns that indicate navigation at start (case-insensitive check)
     let start_nav_patterns = [
-        "< back", "<back", "back |", "| forward", "forward >",
-        "home |", "| home", "| about", "| contact", "| links",
-        "skip to content", "skip to main", "jump to navigation",
+        "< back",
+        "<back",
+        "back |",
+        "| forward",
+        "forward >",
+        "home |",
+        "| home",
+        "| about",
+        "| contact",
+        "| links",
+        "skip to content",
+        "skip to main",
+        "jump to navigation",
     ];
 
     // Strip navigation from start
@@ -3787,8 +4140,11 @@ mod tests {
                 assert!(result.metadata.title.is_some());
                 let title = result.metadata.title.unwrap();
                 // Title should be from either <title> or h1 (both valid sources)
-                assert!(title == "Test" || title == "Article Title",
-                    "title should be from title tag or h1; got: {:?}", title);
+                assert!(
+                    title == "Test" || title == "Article Title",
+                    "title should be from title tag or h1; got: {:?}",
+                    title
+                );
             }
             Err(err) => panic!("expected Ok(_), got Err({err:?})"),
         }
@@ -3797,7 +4153,8 @@ mod tests {
     #[test]
     fn extract_returns_partial_result_for_empty_content() {
         let html = "<html><body></body></html>";
-        let result = extract_content(html, &Options::default()).expect("should return Ok with warnings");
+        let result =
+            extract_content(html, &Options::default()).expect("should return Ok with warnings");
         assert!(result.content_text.is_empty());
         assert!(!result.warnings.is_empty());
         assert!(result.warnings[0].contains("Content extraction failed"));
@@ -3848,28 +4205,32 @@ mod tests {
 
     #[test]
     fn extract_returns_partial_result_for_empty_string_input() {
-        let result = extract_content("", &Options::default()).expect("should return Ok with warnings");
+        let result =
+            extract_content("", &Options::default()).expect("should return Ok with warnings");
         assert!(result.content_text.is_empty());
         assert!(!result.warnings.is_empty());
     }
 
     #[test]
     fn extract_returns_partial_result_for_whitespace_only_input() {
-        let result = extract_content("   \n\t  ", &Options::default()).expect("should return Ok with warnings");
+        let result = extract_content("   \n\t  ", &Options::default())
+            .expect("should return Ok with warnings");
         assert!(result.content_text.is_empty());
         assert!(!result.warnings.is_empty());
     }
 
     #[test]
     fn extract_returns_partial_result_for_minimal_html() {
-        let result = extract_content("<html></html>", &Options::default()).expect("should return Ok with warnings");
+        let result = extract_content("<html></html>", &Options::default())
+            .expect("should return Ok with warnings");
         assert!(result.content_text.is_empty());
         assert!(!result.warnings.is_empty());
     }
 
     #[test]
     fn extract_returns_partial_result_for_body_only_html() {
-        let result = extract_content("<body></body>", &Options::default()).expect("should return Ok with warnings");
+        let result = extract_content("<body></body>", &Options::default())
+            .expect("should return Ok with warnings");
         assert!(result.content_text.is_empty());
         assert!(!result.warnings.is_empty());
     }
@@ -3914,7 +4275,10 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert!(result.is_ok());
-        assert!(elapsed < Duration::from_secs(60), "large HTML parsing took {elapsed:?}");
+        assert!(
+            elapsed < Duration::from_secs(60),
+            "large HTML parsing took {elapsed:?}"
+        );
     }
 
     #[test]
@@ -3937,7 +4301,10 @@ mod tests {
         assert!(is_boilerplate("sidebar-menu"));
         assert!(!is_boilerplate("article-content"));
         // "address" class should NOT be treated as boilerplate
-        assert!(!is_boilerplate("address"), "address class should not be boilerplate");
+        assert!(
+            !is_boilerplate("address"),
+            "address class should not be boilerplate"
+        );
     }
 
     // Story 7-1: BEM-aware boilerplate detection tests
@@ -4027,7 +4394,10 @@ mod tests {
         match extract_content(html, &options) {
             Ok(result) => {
                 // Should have warning about insufficient content
-                assert!(result.warnings.iter().any(|w| w.contains("Insufficient content")));
+                assert!(result
+                    .warnings
+                    .iter()
+                    .any(|w| w.contains("Insufficient content")));
                 assert!(result.warnings.iter().any(|w| w.contains("chars")));
             }
             Err(err) => panic!("expected Ok(_), got Err({err:?})"),
@@ -4070,7 +4440,10 @@ mod tests {
         match extract_content(html, &options) {
             Ok(result) => {
                 // Should have warning about insufficient content
-                assert!(result.warnings.iter().any(|w| w.contains("Insufficient content")));
+                assert!(result
+                    .warnings
+                    .iter()
+                    .any(|w| w.contains("Insufficient content")));
                 assert!(result.warnings.iter().any(|w| w.contains("words")));
             }
             Err(err) => panic!("expected Ok(_), got Err({err:?})"),
@@ -4089,8 +4462,8 @@ mod tests {
         let options = Options {
             include_comments: true,
             min_output_comm_size: 50, // Require at least 50 words in comments
-            min_output_size: 5,        // Low threshold for main content
-            min_extracted_len: 10,     // Low threshold for main content
+            min_output_size: 5,       // Low threshold for main content
+            min_extracted_len: 10,    // Low threshold for main content
             ..Options::default()
         };
 
@@ -4101,7 +4474,10 @@ mod tests {
                 assert!(result.comments_html.is_none());
 
                 // Should have warning about comments removal
-                assert!(result.warnings.iter().any(|w| w.contains("Comments section removed")));
+                assert!(result
+                    .warnings
+                    .iter()
+                    .any(|w| w.contains("Comments section removed")));
             }
             Err(err) => panic!("expected Ok(_), got Err({err:?})"),
         }
@@ -4120,7 +4496,11 @@ mod tests {
         match extract_content(html, &options) {
             Ok(result) => {
                 // Should have specific warning with thresholds
-                match result.warnings.iter().find(|w| w.contains("Insufficient content")) {
+                match result
+                    .warnings
+                    .iter()
+                    .find(|w| w.contains("Insufficient content"))
+                {
                     Some(warning) => {
                         assert!(warning.contains("words"));
                         assert!(warning.contains("chars"));
@@ -4178,7 +4558,11 @@ mod tests {
         match extract_content(html, &options) {
             Ok(result) => {
                 // Should have warning about comments removal
-                match result.warnings.iter().find(|w| w.contains("Comments section removed")) {
+                match result
+                    .warnings
+                    .iter()
+                    .find(|w| w.contains("Comments section removed"))
+                {
                     Some(warning) => {
                         assert!(warning.contains("words"));
                         assert!(warning.contains("min:"));
@@ -4194,5 +4578,8 @@ mod tests {
 #[cfg(test)]
 #[test]
 fn test_bloginner_content_not_boilerplate() {
-    assert!(!is_boilerplate("blogInner__content"), "blogInner__content should NOT be boilerplate");
+    assert!(
+        !is_boilerplate("blogInner__content"),
+        "blogInner__content should NOT be boilerplate"
+    );
 }
