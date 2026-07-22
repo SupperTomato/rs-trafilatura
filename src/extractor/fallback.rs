@@ -112,12 +112,24 @@ pub fn extract_discourse_content(doc: &Document) -> Option<String> {
 /// Render text embedded in JSON-LD, unescaping common HTML entities and parsing
 /// only when the value contains recognizable HTML markup.
 fn render_json_text(raw: &str) -> String {
-    let text = raw
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&amp;", "&");
+    let raw = raw.trim();
+    if !raw.contains('<') && !raw.contains('&') {
+        return raw.to_string();
+    }
+
+    let text = if raw.contains('&') {
+        raw.replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+            .replace("&amp;", "&")
+    } else {
+        raw.to_string()
+    };
+
+    if !text.contains('<') {
+        return text.trim().to_string();
+    }
 
     let lower = text.to_ascii_lowercase();
     let has_markup = [
@@ -134,6 +146,50 @@ fn render_json_text(raw: &str) -> String {
     } else {
         text.trim().to_string()
     }
+}
+
+fn collect_json_ld_content(doc: &Document) -> (Vec<String>, Vec<String>) {
+    let mut bodies = Vec::new();
+    let mut teasers = Vec::new();
+
+    for script in doc.select(r#"script[type="application/ld+json"]"#).nodes() {
+        let script_sel = Selection::from(*script);
+        let json_text = dom::text_content(&script_sel).trim().to_string();
+
+        if json_text.is_empty() {
+            continue;
+        }
+
+        if !has_json_text_hook(&json_text) {
+            continue;
+        }
+
+        let data: Value = match serde_json::from_str(&json_text) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        collect_json_text(&data, &mut bodies, &mut teasers);
+    }
+
+    (bodies, teasers)
+}
+
+fn has_json_text_hook(text: &str) -> bool {
+    [
+        "articleBody",
+        "articlebody",
+        "reviewBody",
+        "reviewbody",
+        "recipeInstructions",
+        "acceptedAnswer",
+        "HowTo",
+        "Product",
+        "VideoObject",
+        "step",
+    ]
+    .iter()
+    .any(|hook| text.contains(hook))
 }
 
 fn json_items(value: Option<&Value>) -> Vec<&Value> {
@@ -158,8 +214,11 @@ fn json_type_contains(value: Option<&Value>, needle: &str) -> bool {
 fn collect_json_text(value: &Value, bodies: &mut Vec<String>, teasers: &mut Vec<String>) {
     match value {
         Value::Object(map) => {
-            for key in ["articleBody", "reviewBody"] {
-                if let Some(Value::String(text)) = map.get(key) {
+            for (key, value) in map {
+                if key.eq_ignore_ascii_case("articleBody") || key.eq_ignore_ascii_case("reviewBody") {
+                    let Value::String(text) = value else {
+                        continue;
+                    };
                     let text = render_json_text(text);
                     if !text.is_empty() {
                         bodies.push(text);
@@ -237,50 +296,12 @@ fn collect_json_text(value: &Value, bodies: &mut Vec<String>, teasers: &mut Vec<
 /// Go equivalent: Part of `baseline(doc)` (lines 39-94)
 #[must_use]
 pub fn extract_json_ld_article_body(doc: &Document) -> Option<String> {
-    for script in doc.select(r#"script[type="application/ld+json"]"#).nodes() {
-        let script_sel = Selection::from(*script);
-        let json_text = dom::text_content(&script_sel).trim().to_string();
-
-        if json_text.is_empty() {
-            continue;
-        }
-
-        // Parse JSON
-        let data: Value = match serde_json::from_str(&json_text) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        let mut bodies = Vec::new();
-        let mut teasers = Vec::new();
-        collect_json_text(&data, &mut bodies, &mut teasers);
-        if !bodies.is_empty() {
-            return Some(bodies.join("\n\n"));
-        }
-    }
-
-    None
+    let (bodies, _) = collect_json_ld_content(doc);
+    (!bodies.is_empty()).then(|| bodies.join("\n\n"))
 }
 
 fn extract_json_ld_teaser(doc: &Document) -> Option<String> {
-    let mut teasers = Vec::new();
-
-    for script in doc.select(r#"script[type="application/ld+json"]"#).nodes() {
-        let script_sel = Selection::from(*script);
-        let json_text = dom::text_content(&script_sel).trim().to_string();
-        if json_text.is_empty() {
-            continue;
-        }
-
-        let data: Value = match serde_json::from_str(&json_text) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        let mut bodies = Vec::new();
-        collect_json_text(&data, &mut bodies, &mut teasers);
-    }
-
+    let (_, teasers) = collect_json_ld_content(doc);
     teasers.into_iter().max_by_key(std::string::String::len)
 }
 
@@ -367,7 +388,9 @@ pub fn baseline(doc: &Document) -> (Document, String) {
     let mut tmp_text = String::new();
 
     // 1. Try JSON-LD article body first
-    if let Some(article_body) = extract_json_ld_article_body(doc) {
+    let (json_bodies, json_teasers) = collect_json_ld_content(doc);
+    if !json_bodies.is_empty() {
+        let article_body = json_bodies.join("\n\n");
         let p = etree::sub_element(&post_body, "p");
         etree::set_text(&p, &article_body);
         tmp_text = article_body;
@@ -378,7 +401,7 @@ pub fn baseline(doc: &Document) -> (Document, String) {
         }
     }
 
-    let json_teaser = extract_json_ld_teaser(doc);
+    let json_teaser = json_teasers.into_iter().max_by_key(std::string::String::len);
 
     // 2. Basic tree cleaning
     basic_cleaning(doc);
@@ -799,6 +822,19 @@ mod tests {
 
         assert!(result.is_some());
         assert_eq!(result.unwrap(), "Nested article body.");
+    }
+
+    #[test]
+    fn test_extract_json_ld_lowercase_articlebody() {
+        let html = r#"<!DOCTYPE html>
+        <html><head><script type="application/ld+json">
+        {"@type":"Article","articlebody":"Lowercase article body should still work."}
+        </script></head><body></body></html>"#;
+
+        let doc = Document::from(html);
+        let result = extract_json_ld_article_body(&doc).expect("lowercase articlebody should work");
+
+        assert_eq!(result, "Lowercase article body should still work.");
     }
 
     #[test]

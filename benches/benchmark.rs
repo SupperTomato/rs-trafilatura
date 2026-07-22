@@ -7,7 +7,7 @@
 //! - Real-world HTML files from benchmark dataset for realistic performance
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use rs_trafilatura::{extract, extract_with_options, Options};
+use rs_trafilatura::{baseline, extract, extract_with_options, html2txt, Options};
 use std::fs;
 
 const SAMPLE_HTML: &str = r#"
@@ -48,6 +48,66 @@ const SAMPLE_HTML: &str = r#"
 </html>
 "#;
 
+const JSON_LD_HTML: &str = r#"
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Structured Data Article</title>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": {
+            "@type": "Question",
+            "name": "How does extraction work?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Rust extraction parses the DOM, scores content candidates, and falls back to structured JSON-LD text when visible content is not sufficient."
+            }
+        },
+        "recipeInstructions": [
+            {"text": "Parse the document once."},
+            {"itemListElement": [{"text": "Collect structured body text."}]}
+        ]
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "description": "This product teaser is available only as structured metadata and should be kept as fallback text."
+    }
+    </script>
+</head>
+<body><nav>Home Products Cart</nav></body>
+</html>
+"#;
+
+const METADATA_ONLY_JSON_LD_HTML: &str = r#"
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Metadata Only</title>
+    <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","name":"Example","url":"https://example.com"}
+    </script>
+    <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"name":"Home"},{"name":"Section"}]}
+    </script>
+    <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","name":"Example","potentialAction":{"@type":"SearchAction"}}
+    </script>
+</head>
+<body>
+    <article>
+        <p>Fallback should eventually use visible article text when metadata-only JSON-LD contains no content body.</p>
+        <p>This benchmark measures the cost of scanning irrelevant structured data scripts.</p>
+        <p>The optimized path should skip JSON parsing when no content-bearing hook is present.</p>
+    </article>
+</body>
+</html>
+"#;
+
 fn bench_extract_default(c: &mut Criterion) {
     c.bench_function("extract_default", |b| {
         b.iter(|| extract(black_box(SAMPLE_HTML)));
@@ -64,6 +124,31 @@ fn bench_extract_with_options(c: &mut Criterion) {
     c.bench_function("extract_with_options", |b| {
         b.iter(|| extract_with_options(black_box(SAMPLE_HTML), black_box(&options)));
     });
+}
+
+fn bench_official_api_helpers(c: &mut Criterion) {
+    let mut group = c.benchmark_group("official_api");
+    group.throughput(Throughput::Bytes(SAMPLE_HTML.len() as u64));
+
+    group.bench_function("baseline_sample", |b| {
+        b.iter(|| baseline(black_box(SAMPLE_HTML)));
+    });
+
+    group.bench_function("html2txt_clean_sample", |b| {
+        b.iter(|| html2txt(black_box(SAMPLE_HTML), black_box(true)));
+    });
+
+    group.throughput(Throughput::Bytes(JSON_LD_HTML.len() as u64));
+    group.bench_function("baseline_json_ld", |b| {
+        b.iter(|| baseline(black_box(JSON_LD_HTML)));
+    });
+
+    group.throughput(Throughput::Bytes(METADATA_ONLY_JSON_LD_HTML.len() as u64));
+    group.bench_function("baseline_metadata_only_json_ld", |b| {
+        b.iter(|| baseline(black_box(METADATA_ONLY_JSON_LD_HTML)));
+    });
+
+    group.finish();
 }
 
 /// Benchmark with real-world HTML files of varying sizes
@@ -97,6 +182,7 @@ criterion_group!(
     benches,
     bench_extract_default,
     bench_extract_with_options,
+    bench_official_api_helpers,
     bench_real_world_html
 );
 criterion_main!(benches);
