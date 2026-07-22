@@ -14,7 +14,7 @@ use super::tags::VALID_TAG_CATALOG;
 
 // === Baseline Extraction ===
 
-static BASIC_CLEANING_SELECTOR: &str = "aside, footer, nav, header, div[id*=\"footer\"], div[class*=\"footer\"], div[class*=\"consent\"], div[class*=\"cookie\"], div[class*=\"privacy\"], div[class*=\"gdpr\"], div[class*=\"banner\"], div[class*=\"modal\"], div[class*=\"popup\"], div[class*=\"newsletter\"], script, style, noscript";
+static BASIC_CLEANING_SELECTOR: &str = "aside, fencedframe, footer, nav, header, div[id*=\"footer\"], div[class*=\"footer\"], div[class*=\"consent\"], div[class*=\"cookie\"], div[class*=\"privacy\"], div[class*=\"gdpr\"], div[class*=\"banner\"], div[class*=\"modal\"], div[class*=\"popup\"], div[class*=\"newsletter\"], script, style, noscript";
 
 /// Basic document cleaning for baseline extraction.
 ///
@@ -486,7 +486,7 @@ pub fn baseline(doc: &Document) -> (Document, String) {
 // === Fallback Comparison ===
 
 static TAGS_TO_SANITIZE: &[&str] = &[
-    "aside", "audio", "button", "fieldset", "figure", "footer", "iframe",
+    "aside", "audio", "button", "fencedframe", "fieldset", "figure", "footer", "iframe",
     "input", "label", "link", "nav", "noindex", "noscript",
     "object", "option", "select", "source", "svg", "time",
     "script", "style",

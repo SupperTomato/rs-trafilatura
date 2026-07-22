@@ -19,6 +19,27 @@ fn image_from_og_image() {
 }
 
 #[test]
+fn image_from_meta_name_image() {
+    let html = r#"
+        <html>
+          <head>
+            <meta name="image" content="https://example.com/meta-image.png" />
+          </head>
+          <body><article><p>Body</p></article></body>
+        </html>
+    "#;
+
+    let result = extract(html);
+    match result {
+        Ok(result) => assert_eq!(
+            result.metadata.image.as_deref(),
+            Some("https://example.com/meta-image.png")
+        ),
+        Err(err) => panic!("expected Ok(_), got Err({err:?})"),
+    }
+}
+
+#[test]
 
 fn license_from_dc_rights_meta_creative_commons_url_is_normalized() {
     let html = r#"

@@ -88,9 +88,9 @@ pub static XML_CELL_TAG_SET: LazyLock<HashSet<&'static str>> = LazyLock::new(|| 
 
 /// Tags to completely remove (including children) during document cleaning.
 /// From go-trafilatura settings.go `tagsToClean`.
-pub static TAGS_TO_CLEAN: [&str; 50] = [
+pub static TAGS_TO_CLEAN: [&str; 51] = [
     // important
-    "aside", "embed", "footer", "form", "head", "iframe", "menu", "object", "script",
+    "aside", "embed", "fencedframe", "footer", "form", "head", "iframe", "menu", "object", "script",
     // other content
     "applet", "audio", "canvas", "figure", "map", "picture", "svg", "video",
     // secondary
@@ -485,7 +485,7 @@ mod tests {
     #[test]
     fn test_cleaning_tag_counts() {
         // Verify tag counts match go-trafilatura settings.go
-        assert_eq!(TAGS_TO_CLEAN.len(), 50, "tagsToClean should have 50 tags");
+        assert_eq!(TAGS_TO_CLEAN.len(), 51, "tagsToClean should have 51 tags");
         assert_eq!(TAGS_TO_STRIP.len(), 18, "tagsToStrip should have 18 tags");
         assert_eq!(EMPTY_TAGS_TO_REMOVE.len(), 22, "emptyTagsToRemove should have 22 tags");
     }

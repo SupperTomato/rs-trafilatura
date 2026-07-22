@@ -45,6 +45,7 @@ fn baseline_and_html2txt_match_official_local_helpers() {
         <html>
           <body>
             <nav>Home About Contact</nav>
+            <fencedframe>Frame noise should be removed</fencedframe>
             <article><p>Baseline extraction keeps the article paragraph for callers.</p></article>
             <script>ignored()</script>
           </body>
@@ -59,6 +60,7 @@ fn baseline_and_html2txt_match_official_local_helpers() {
     let text = html2txt(html, true);
     assert!(text.contains("Baseline extraction keeps"));
     assert!(!text.contains("Home About Contact"));
+    assert!(!text.contains("Frame noise"));
     assert!(!text.contains("ignored"));
 }
 

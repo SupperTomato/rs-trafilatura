@@ -83,7 +83,7 @@ pub fn examine_meta(doc: &Document, original: Metadata, _opts: &Options) -> Meta
             }
 
             // Image
-            "og:image" | "twitter:image" | "twitter:image:src" | "thumbnail" => {
+            "og:image" | "twitter:image" | "twitter:image:src" | "thumbnail" | "image" => {
                 if result.image.is_none() {
                     result.image = Some(content.clone());
                 }

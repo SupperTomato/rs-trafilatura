@@ -219,7 +219,7 @@ pub fn html2txt(content: &str, clean: bool) -> String {
 
     if clean {
         let nodes = document
-            .select("aside, footer, nav, header, script, style, noscript")
+            .select("aside, fencedframe, footer, nav, header, script, style, noscript")
             .nodes()
             .to_vec();
         for node in nodes.into_iter().rev() {

@@ -27,6 +27,29 @@ fn nav_is_excluded_even_inside_article() {
 }
 
 #[test]
+fn fencedframe_is_excluded_even_inside_article() {
+    let html = r#"
+        <html>
+          <body>
+            <article>
+              <fencedframe>FRAME_NOISE_TEXT</fencedframe>
+              <p>BODY_TEXT</p>
+            </article>
+          </body>
+        </html>
+    "#;
+
+    let result = extract(html);
+    match result {
+        Ok(result) => {
+            assert!(result.content_text.contains("BODY_TEXT"));
+            assert!(!result.content_text.contains("FRAME_NOISE_TEXT"));
+        }
+        Err(err) => panic!("expected Ok(_), got Err({err:?})"),
+    }
+}
+
+#[test]
 fn site_footer_is_excluded_but_article_footer_is_preserved() {
     let html = format!(r#"
         <html>
