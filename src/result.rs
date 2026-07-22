@@ -32,7 +32,7 @@ pub struct ImageData {
 ///
 /// Contains the extracted content in both text and HTML formats,
 /// along with metadata about the document.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExtractResult {
     /// Main content as plain text.
     pub content_text: String,
@@ -87,7 +87,7 @@ pub struct ExtractResult {
 ///
 /// All fields are optional as metadata may not be present in all documents.
 /// Fields match go-trafilatura's Metadata struct for compatibility.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Metadata {
     /// Page title.
     pub title: Option<String>,
@@ -133,4 +133,20 @@ pub struct Metadata {
 
     /// Page type classification (article, product, etc.).
     pub page_type: Option<String>,
+}
+
+/// Baseline extraction output.
+///
+/// Mirrors trafilatura's baseline return shape with a serialized `<body>`
+/// fragment, plain text, and text length.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BaselineResult {
+    /// Serialized baseline `<body>` element.
+    pub body_html: String,
+
+    /// Plain text extracted by the baseline strategy.
+    pub text: String,
+
+    /// UTF-8 character length of `text`.
+    pub len: usize,
 }

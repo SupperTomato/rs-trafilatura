@@ -89,7 +89,7 @@ pub(crate) mod link_density;
 // Public API - re-exports
 pub use error::{Error, Result};
 pub use options::Options;
-pub use result::{ExtractResult, ImageData, Metadata};
+pub use result::{BaselineResult, ExtractResult, ImageData, Metadata};
 
 /// Extracts main content from an HTML document using default options.
 ///
@@ -146,6 +146,96 @@ pub fn extract(html: &str) -> Result<ExtractResult> {
 #[allow(clippy::missing_errors_doc)]
 pub fn extract_with_options(html: &str, options: &Options) -> Result<ExtractResult> {
     extract::extract_content(html, options)
+}
+
+/// Low-level extraction helper matching trafilatura's `bare_extraction` role.
+///
+/// Rust already returns structured data from `extract_with_options`, so this is
+/// an explicit compatibility alias for callers porting from Python.
+#[allow(clippy::missing_errors_doc)]
+pub fn bare_extraction(html: &str, options: &Options) -> Result<ExtractResult> {
+    extract_with_options(html, options)
+}
+
+/// Extract main content and metadata using default options.
+///
+/// The Rust result always carries metadata, so this is a compatibility alias
+/// for trafilatura's `extract_with_metadata` helper.
+#[allow(clippy::missing_errors_doc)]
+pub fn extract_with_metadata(html: &str) -> Result<ExtractResult> {
+    extract(html)
+}
+
+/// Extract document metadata without running full content extraction.
+#[must_use]
+pub fn extract_metadata(html: &str, options: &Options) -> Metadata {
+    let document = dom_query::Document::from(html);
+    metadata::extract_metadata(&document, options)
+}
+
+/// Parse HTML into a DOM document.
+///
+/// This is the Rust equivalent of trafilatura's local `load_html` helper. The
+/// underlying parser is forgiving and returns a document for malformed HTML.
+#[must_use]
+pub fn load_html(html: &str) -> dom_query::Document {
+    dom_query::Document::from(html)
+}
+
+/// Parse HTML bytes into a DOM document with charset detection.
+#[must_use]
+pub fn load_html_bytes(html: &[u8]) -> dom_query::Document {
+    let html_str = encoding::transcode_to_utf8(html);
+    load_html(&html_str)
+}
+
+/// Run baseline extraction targeting JSON-LD, article tags, paragraphs, then body text.
+#[must_use]
+pub fn baseline(html: &str) -> BaselineResult {
+    let document = load_html(html);
+    let (body_doc, text) = extractor::fallback::baseline(&document);
+    let body = body_doc.select("body");
+    let body_html = if body.length() > 0 {
+        dom::outer_html(&body).to_string()
+    } else {
+        String::new()
+    };
+    let len = text.chars().count();
+
+    BaselineResult {
+        body_html,
+        text,
+        len,
+    }
+}
+
+/// Run basic HTML-to-text conversion.
+///
+/// When `clean` is true, common boilerplate and non-text elements are removed
+/// before whitespace-normalized text extraction.
+#[must_use]
+pub fn html2txt(content: &str, clean: bool) -> String {
+    let document = load_html(content);
+
+    if clean {
+        let nodes = document
+            .select("aside, footer, nav, header, script, style, noscript")
+            .nodes()
+            .to_vec();
+        for node in nodes.into_iter().rev() {
+            etree::remove(&dom_query::Selection::from(node), false);
+        }
+    }
+
+    let body = document.select("body");
+    if body.length() == 0 {
+        return String::new();
+    }
+
+    dom::text_content(&body)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Extracts main content from HTML bytes with automatic encoding detection.

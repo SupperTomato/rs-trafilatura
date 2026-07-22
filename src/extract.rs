@@ -1213,6 +1213,17 @@ fn apply_final_validations(
     _doc: &Document,
     options: &Options,
 ) -> Result<ExtractResult> {
+    if options.only_with_metadata
+        && (result.metadata.title.is_none()
+            || result.metadata.date.is_none()
+            || result.metadata.url.is_none())
+    {
+        return Err(Error::ExtractionError(
+            "required metadata missing: title, date, and url are required when only_with_metadata is enabled"
+                .to_string(),
+        ));
+    }
+
     // TODO: Multi-signal link-dense boilerplate removal (strip_link_dense_sections)
     // Currently disabled — the post-extraction filter regresses F1 from 0.857 to 0.846
     // because root.select("div") matches content-wrapping divs, not just nav sections.

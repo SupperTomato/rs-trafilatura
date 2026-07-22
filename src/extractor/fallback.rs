@@ -109,33 +109,122 @@ pub fn extract_discourse_content(doc: &Document) -> Option<String> {
     Some(content_parts.join("\n\n"))
 }
 
-/// Recursively find articleBody in JSON-LD data.
-fn find_article_body(value: &Value) -> Option<String> {
+/// Render text embedded in JSON-LD, unescaping common HTML entities and parsing
+/// only when the value contains recognizable HTML markup.
+fn render_json_text(raw: &str) -> String {
+    let text = raw
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&");
+
+    let lower = text.to_ascii_lowercase();
+    let has_markup = [
+        "<p", "</p", "<div", "</div", "<br", "<article", "</article", "<li",
+        "</li", "<ul", "</ul", "<ol", "</ol", "<blockquote", "</blockquote", "<pre",
+        "</pre",
+    ]
+    .iter()
+    .any(|tag| lower.contains(tag));
+
+    if has_markup {
+        let temp_doc = Document::from(format!("<div>{text}</div>"));
+        dom::text_content(&temp_doc.select("div")).trim().to_string()
+    } else {
+        text.trim().to_string()
+    }
+}
+
+fn json_items(value: Option<&Value>) -> Vec<&Value> {
+    match value {
+        Some(Value::Array(items)) => items.iter().collect(),
+        Some(item) => vec![item],
+        None => Vec::new(),
+    }
+}
+
+fn json_type_contains(value: Option<&Value>, needle: &str) -> bool {
+    match value {
+        Some(Value::String(s)) => s.contains(needle),
+        Some(Value::Array(items)) => items
+            .iter()
+            .any(|item| item.as_str().is_some_and(|s| s.contains(needle))),
+        _ => false,
+    }
+}
+
+/// Recursively collect schema.org text content from JSON-LD data.
+fn collect_json_text(value: &Value, bodies: &mut Vec<String>, teasers: &mut Vec<String>) {
     match value {
         Value::Object(map) => {
-            for (key, val) in map {
-                if key.to_lowercase() == "articlebody" {
-                    if let Value::String(s) = val {
-                        return Some(s.clone());
+            for key in ["articleBody", "reviewBody"] {
+                if let Some(Value::String(text)) = map.get(key) {
+                    let text = render_json_text(text);
+                    if !text.is_empty() {
+                        bodies.push(text);
                     }
                 }
+            }
 
-                // Recurse into nested objects
-                if let Some(found) = find_article_body(val) {
-                    return Some(found);
+            for key in ["recipeInstructions", "step"] {
+                for step in json_items(map.get(key)) {
+                    match step {
+                        Value::String(text) => {
+                            let text = render_json_text(text);
+                            if !text.is_empty() {
+                                bodies.push(text);
+                            }
+                        }
+                        Value::Object(step_map) => {
+                            for sub in
+                                std::iter::once(step).chain(json_items(step_map.get("itemListElement")))
+                            {
+                                if let Value::Object(sub_map) = sub {
+                                    if let Some(Value::String(text)) = sub_map.get("text") {
+                                        let text = render_json_text(text);
+                                        if !text.is_empty() {
+                                            bodies.push(text);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
-            None
+
+            if let Some(Value::Object(answer)) = map.get("acceptedAnswer") {
+                if let Some(Value::String(text)) = answer.get("text") {
+                    let text = render_json_text(text);
+                    if !text.is_empty() {
+                        bodies.push(text);
+                    }
+                }
+            }
+
+            let is_teaser_type = json_type_contains(map.get("@type"), "Product")
+                || json_type_contains(map.get("@type"), "VideoObject");
+            if is_teaser_type {
+                if let Some(Value::String(desc)) = map.get("description") {
+                    let desc = render_json_text(desc);
+                    if !desc.is_empty() {
+                        teasers.push(desc);
+                    }
+                }
+            }
+
+            for val in map.values() {
+                collect_json_text(val, bodies, teasers);
+            }
         }
         Value::Array(arr) => {
             for item in arr {
-                if let Some(found) = find_article_body(item) {
-                    return Some(found);
-                }
+                collect_json_text(item, bodies, teasers);
             }
-            None
         }
-        _ => None,
+        _ => {}
     }
 }
 
@@ -162,21 +251,37 @@ pub fn extract_json_ld_article_body(doc: &Document) -> Option<String> {
             Err(_) => continue,
         };
 
-        // Recursively search for articleBody
-        if let Some(article_body) = find_article_body(&data) {
-            let body = article_body.trim().to_string();
-            if !body.is_empty() {
-                // If contains HTML, extract text
-                if body.contains("<p>") {
-                    let temp_doc = Document::from(format!("<div>{body}</div>"));
-                    return Some(dom::text_content(&temp_doc.select("div")).trim().to_string());
-                }
-                return Some(body);
-            }
+        let mut bodies = Vec::new();
+        let mut teasers = Vec::new();
+        collect_json_text(&data, &mut bodies, &mut teasers);
+        if !bodies.is_empty() {
+            return Some(bodies.join("\n\n"));
         }
     }
 
     None
+}
+
+fn extract_json_ld_teaser(doc: &Document) -> Option<String> {
+    let mut teasers = Vec::new();
+
+    for script in doc.select(r#"script[type="application/ld+json"]"#).nodes() {
+        let script_sel = Selection::from(*script);
+        let json_text = dom::text_content(&script_sel).trim().to_string();
+        if json_text.is_empty() {
+            continue;
+        }
+
+        let data: Value = match serde_json::from_str(&json_text) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let mut bodies = Vec::new();
+        collect_json_text(&data, &mut bodies, &mut teasers);
+    }
+
+    teasers.into_iter().max_by_key(std::string::String::len)
 }
 
 /// Extract product description from JSON-LD Product structured data.
@@ -273,6 +378,8 @@ pub fn baseline(doc: &Document) -> (Document, String) {
         }
     }
 
+    let json_teaser = extract_json_ld_teaser(doc);
+
     // 2. Basic tree cleaning
     basic_cleaning(doc);
 
@@ -347,7 +454,16 @@ pub fn baseline(doc: &Document) -> (Document, String) {
         return (post_body_doc, tmp_text);
     }
 
-    // 5. Default strategy: take everything from body
+    // 5. Last-resort JSON-LD teaser descriptions for product/video pages.
+    if let Some(teaser) = json_teaser {
+        if !teaser.is_empty() {
+            let p = etree::sub_element(&post_body, "p");
+            etree::set_text(&p, &teaser);
+            return (post_body_doc, teaser);
+        }
+    }
+
+    // 6. Default strategy: take everything from body
     if let Some(body_node) = doc.select("body").nodes().first() {
         let body = Selection::from(*body_node);
         let text = etree::iter_text(&body, "\n").trim().to_string();
@@ -359,7 +475,7 @@ pub fn baseline(doc: &Document) -> (Document, String) {
         }
     }
 
-    // 6. Final fallback: entire document text
+    // 7. Final fallback: entire document text
     let text = dom::text_content(&doc.select("*")).trim().to_string();
     let elem = etree::sub_element(&post_body, "p");
     etree::set_text(&elem, &text);
@@ -707,6 +823,53 @@ mod tests {
         let text = result.unwrap();
         assert!(text.contains("Paragraph one"));
         assert!(!text.contains("<p>"));
+    }
+
+    #[test]
+    fn test_extract_json_ld_review_body() {
+        let html = r#"<!DOCTYPE html>
+        <html><head><script type="application/ld+json">
+        {"@type":"Review","reviewBody":"This review body should be usable fallback content."}
+        </script></head><body></body></html>"#;
+
+        let doc = Document::from(html);
+        let result = extract_json_ld_article_body(&doc).expect("reviewBody should be extracted");
+
+        assert!(result.contains("usable fallback content"));
+    }
+
+    #[test]
+    fn test_extract_json_ld_recipe_and_faq_text() {
+        let html = r#"<!DOCTYPE html>
+        <html><head><script type="application/ld+json">
+        {
+          "@type":"FAQPage",
+          "recipeInstructions":[{"text":"Mix the ingredients."},{"itemListElement":[{"text":"Bake until golden."}]}],
+          "mainEntity":{"acceptedAnswer":{"text":"The accepted answer is extracted."}}
+        }
+        </script></head><body></body></html>"#;
+
+        let doc = Document::from(html);
+        let result =
+            extract_json_ld_article_body(&doc).expect("structured text should be extracted");
+
+        assert!(result.contains("Mix the ingredients"));
+        assert!(result.contains("Bake until golden"));
+        assert!(result.contains("accepted answer"));
+    }
+
+    #[test]
+    fn test_baseline_uses_product_description_as_teaser() {
+        let html = r#"<!DOCTYPE html>
+        <html><head><script type="application/ld+json">
+        {"@type":"Product","description":"This product description is the best available page text."}
+        </script></head><body><nav>Home Shop Cart</nav></body></html>"#;
+
+        let doc = Document::from(html);
+        let (_body_doc, text) = baseline(&doc);
+
+        assert!(text.contains("best available page text"));
+        assert!(!text.contains("Home Shop Cart"));
     }
 
     #[test]
