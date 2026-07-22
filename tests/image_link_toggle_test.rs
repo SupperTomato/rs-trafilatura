@@ -150,6 +150,129 @@ fn include_images_prefers_highest_width_srcset_candidate() {
     assert_eq!(result.images[0].src, "https://example.com/image-976.jpg");
 }
 
+#[test]
+fn include_images_prefers_picture_source_srcset_candidate() {
+    let html = r#"
+        <html><body>
+            <article>
+                <p>Content with picture source candidates.</p>
+                <picture>
+                    <source srcset="https://example.com/picture-480.jpg 480w, https://example.com/picture-1200.jpg 1200w" type="image/jpeg">
+                    <img src="https://example.com/picture-fallback.jpg" alt="Picture image">
+                </picture>
+                <p>Additional paragraph content to ensure this document meets the minimum extraction threshold.</p>
+                <p>Further paragraph with enough text to satisfy the scoring algorithm for content quality.</p>
+            </article>
+        </body></html>
+    "#;
+
+    let result = extract_with_options(
+        html,
+        &Options {
+            include_images: true,
+            ..Options::default()
+        },
+    )
+    .expect("extraction failed");
+
+    assert_eq!(result.images.len(), 1);
+    assert_eq!(result.images[0].src, "https://example.com/picture-1200.jpg");
+}
+
+#[test]
+fn include_images_preserves_image_tags_in_html_and_markdown() {
+    let html = r#"
+        <html><body>
+            <article>
+                <p>Content with exported image elements.</p>
+                <figure>
+                    <picture>
+                        <source srcset="https://example.com/hero-small.jpg 600w, https://example.com/hero-large.jpg 1200w" type="image/jpeg">
+                        <img
+                            src="https://example.com/hero-fallback.jpg"
+                            srcset="https://example.com/hero-small.jpg 600w, https://example.com/hero-large.jpg 1200w"
+                            alt="Hero image">
+                    </picture>
+                    <figcaption>Hero caption</figcaption>
+                </figure>
+                <p>Additional paragraph content to ensure this document meets the minimum extraction threshold.</p>
+                <p>Further paragraph with enough text to satisfy the scoring algorithm for content quality.</p>
+            </article>
+        </body></html>
+    "#;
+
+    let result = extract_with_options(
+        html,
+        &Options {
+            include_images: true,
+            output_markdown: true,
+            ..Options::default()
+        },
+    )
+    .expect("extraction failed");
+
+    let content_html = result
+        .content_html
+        .as_deref()
+        .expect("expected content_html");
+    assert!(content_html.contains("<figure>"));
+    assert!(content_html.contains("<picture>"));
+    assert!(content_html.contains("<source"));
+    assert!(content_html.contains("<img"));
+    assert!(content_html.contains("src=\"https://example.com/hero-large.jpg\""));
+    assert!(content_html.contains("alt=\"Hero image\""));
+    assert!(content_html.contains("<figcaption>Hero caption</figcaption>"));
+
+    let markdown = result
+        .content_markdown
+        .as_deref()
+        .expect("expected markdown output");
+    assert!(markdown.contains("Hero image"));
+    assert!(markdown.contains("hero-large.jpg"));
+}
+
+#[test]
+fn default_options_strip_image_tags_from_exports() {
+    let html = r#"
+        <html><body>
+            <article>
+                <p>Content with image tags disabled.</p>
+                <figure>
+                    <img src="https://example.com/hidden.jpg" alt="Hidden image">
+                    <figcaption>Hidden caption</figcaption>
+                </figure>
+                <p>Additional paragraph content to ensure this document meets the minimum extraction threshold.</p>
+                <p>Further paragraph with enough text to satisfy the scoring algorithm for content quality.</p>
+            </article>
+        </body></html>
+    "#;
+
+    let result = extract_with_options(
+        html,
+        &Options {
+            output_markdown: true,
+            ..Options::default()
+        },
+    )
+    .expect("extraction failed");
+
+    assert!(result.images.is_empty());
+    let content_html = result
+        .content_html
+        .as_deref()
+        .expect("expected content_html");
+    assert!(!content_html.contains("<figure"));
+    assert!(!content_html.contains("<img"));
+    assert!(!content_html.contains("hidden.jpg"));
+
+    let markdown = result
+        .content_markdown
+        .as_deref()
+        .expect("expected markdown output");
+    assert!(!markdown.contains("hidden.jpg"));
+    assert!(!markdown.contains("Hidden image"));
+}
+
 /// Test that duplicate images are not added twice
 #[test]
 fn include_images_deduplicates_urls() {
@@ -410,6 +533,15 @@ fn include_media_preserves_video_and_audio_in_html() {
     assert!(content_html.contains("movie.mp4"));
     assert!(content_html.contains("<audio"));
     assert!(content_html.contains("audio.mp3"));
+
+    let markdown = result
+        .content_markdown
+        .as_deref()
+        .expect("expected markdown output");
+    assert!(markdown.contains("Video:"));
+    assert!(markdown.contains("movie.mp4"));
+    assert!(markdown.contains("Audio:"));
+    assert!(markdown.contains("audio.mp3"));
 }
 
 /// Test that image toggle doesn't affect other content

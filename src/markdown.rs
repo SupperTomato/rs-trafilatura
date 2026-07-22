@@ -428,13 +428,16 @@ const MAX_MARKDOWN_TABLE_TEXT_BYTES: usize = 200_000;
 /// conversion to avoid pathological GFM table padding in downstream renderers.
 #[must_use]
 pub(crate) fn prepare_html_for_markdown(html: &str) -> String {
-    if !html.contains("<table") {
+    if !html.contains("<table") && !html.contains("<video") && !html.contains("<audio") {
         return html.to_string();
     }
 
     use dom_query::{Document, Selection};
 
     let doc = Document::from(html);
+
+    replace_media_with_markdown_links(&doc, "video", "Video");
+    replace_media_with_markdown_links(&doc, "audio", "Audio");
 
     // Nested tables inside cells make table renderers treat the whole child table
     // as one cell, then pad every row to that huge width. Flatten them first.
@@ -457,6 +460,45 @@ pub(crate) fn prepare_html_for_markdown(html: &str) -> String {
     }
 
     doc.html().to_string()
+}
+
+fn replace_media_with_markdown_links(doc: &dom_query::Document, selector: &str, label: &str) {
+    let media_nodes = doc.select(selector).nodes().to_vec();
+    for node in media_nodes.into_iter().rev() {
+        let media = dom_query::Selection::from(node);
+        let mut urls = Vec::new();
+        if let Some(src) = non_empty_attr(&media, "src") {
+            urls.push(src);
+        }
+        for source_node in media.select("source").nodes() {
+            let source = dom_query::Selection::from(*source_node);
+            if let Some(src) = non_empty_attr(&source, "src") {
+                urls.push(src);
+            }
+        }
+
+        urls.dedup();
+        if urls.is_empty() {
+            replace_selection_with_compact_block(&media);
+            continue;
+        }
+
+        let links = urls
+            .into_iter()
+            .map(|url| {
+                let escaped_url = escape_html_text(&url);
+                format!("<p><a href=\"{escaped_url}\">{label}: {escaped_url}</a></p>")
+            })
+            .collect::<String>();
+        media.replace_with_html(links);
+    }
+}
+
+fn non_empty_attr(selection: &dom_query::Selection<'_>, name: &str) -> Option<String> {
+    selection
+        .attr(name)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn replace_selection_with_compact_block(selection: &dom_query::Selection<'_>) {

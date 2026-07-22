@@ -3091,6 +3091,9 @@ fn push_filtered_html_children(
                         out.push('"');
                     }
                 }
+                if tag == "img" && options.include_images {
+                    push_image_html_attributes(out, &el);
+                }
                 if tag == "video" && options.include_videos {
                     push_optional_html_attributes(
                         out,
@@ -3119,7 +3122,7 @@ fn push_filtered_html_children(
                 }
                 out.push('>');
 
-                if !matches!(tag.as_str(), "source" | "track") {
+                if !matches!(tag.as_str(), "img" | "source" | "track") {
                     push_filtered_html_children(
                         &el,
                         out,
@@ -3154,12 +3157,28 @@ fn push_filtered_html_children(
 
 fn is_allowed_media_html_tag(tag: &str, options: &Options) -> bool {
     match tag {
+        "figure" | "figcaption" | "picture" | "img" => options.include_images,
         "video" => options.include_videos,
         "audio" => options.include_audio,
         "source" => options.include_images || options.include_videos || options.include_audio,
         "track" => options.include_videos || options.include_audio,
         _ => false,
     }
+}
+
+fn push_image_html_attributes(out: &mut String, el: &Selection) {
+    if let Some(src) = select_best_image_src(el) {
+        out.push_str(" src=\"");
+        out.push_str(&escape_html(&src));
+        out.push('"');
+    }
+    push_optional_html_attributes(
+        out,
+        el,
+        &[
+            "srcset", "sizes", "alt", "title", "width", "height", "loading", "decoding",
+        ],
+    );
 }
 
 fn push_optional_html_attributes(out: &mut String, el: &Selection, attrs: &[&str]) {
@@ -3789,6 +3808,7 @@ fn extract_image_from_figure(
 fn select_best_image_src(img: &Selection<'_>) -> Option<String> {
     best_srcset_candidate(img.attr("srcset").as_deref())
         .or_else(|| best_srcset_candidate(img.attr("data-srcset").as_deref()))
+        .or_else(|| best_picture_source_candidate(img))
         .or_else(|| {
             img.attr("src")
                 .map(|s| s.trim().to_string())
@@ -3801,7 +3821,36 @@ fn select_best_image_src(img: &Selection<'_>) -> Option<String> {
         })
 }
 
+fn best_picture_source_candidate(img: &Selection<'_>) -> Option<String> {
+    let picture = img.parent();
+    if dom::tag_name(&picture).as_deref() != Some("picture") {
+        return None;
+    }
+
+    let mut best: Option<(String, f64)> = None;
+    for source_node in picture.select("source").nodes() {
+        let source = Selection::from(*source_node);
+        for attr in ["srcset", "data-srcset"] {
+            if let Some(candidate) = best_srcset_candidate_with_score(source.attr(attr).as_deref())
+            {
+                if best
+                    .as_ref()
+                    .is_none_or(|(_, best_score)| candidate.1 > *best_score)
+                {
+                    best = Some(candidate);
+                }
+            }
+        }
+    }
+
+    best.map(|(url, _)| url)
+}
+
 fn best_srcset_candidate(srcset: Option<&str>) -> Option<String> {
+    best_srcset_candidate_with_score(srcset).map(|(url, _)| url)
+}
+
+fn best_srcset_candidate_with_score(srcset: Option<&str>) -> Option<(String, f64)> {
     let srcset = srcset?.trim();
     if srcset.is_empty() {
         return None;
@@ -3827,7 +3876,7 @@ fn best_srcset_candidate(srcset: Option<&str>) -> Option<String> {
         }
     }
 
-    best.map(|(url, _)| url)
+    best
 }
 
 fn parse_srcset_descriptor_score(descriptor: &str) -> Option<f64> {
