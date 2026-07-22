@@ -586,8 +586,7 @@ fn try_collect_repeated_items_with_threshold(doc: &Document, min_words: usize) -
     //   <ul/ol> > li*N       (product listings, course lists)
     //   <div> > div*N        (card grids)
 
-    let mut best_group: Option<Vec<String>> = None;
-    let mut best_total_len = 0usize;
+    let mut best_group: Option<(usize, Vec<String>)> = None;
 
     // Search containers that likely hold repeated items
     let container_selectors = [
@@ -610,9 +609,11 @@ fn try_collect_repeated_items_with_threshold(doc: &Document, min_words: usize) -
             // Try article children first (strongest signal)
             if let Some(group) = collect_sibling_group(&container, "article", 3, min_words) {
                 let total: usize = group.iter().map(|t| t.len()).sum();
-                if total > best_total_len {
-                    best_total_len = total;
-                    best_group = Some(group);
+                if best_group
+                    .as_ref()
+                    .map_or(true, |(best_total_len, _)| total > *best_total_len)
+                {
+                    best_group = Some((total, group));
                 }
             }
 
@@ -621,9 +622,11 @@ fn try_collect_repeated_items_with_threshold(doc: &Document, min_words: usize) -
                 let list = Selection::from(*list_node);
                 if let Some(group) = collect_sibling_group(&list, "li", 3, min_words) {
                     let total: usize = group.iter().map(|t| t.len()).sum();
-                    if total > best_total_len {
-                        best_total_len = total;
-                        best_group = Some(group);
+                    if best_group
+                        .as_ref()
+                        .map_or(true, |(best_total_len, _)| total > *best_total_len)
+                    {
+                        best_group = Some((total, group));
                     }
                 }
             }
@@ -650,13 +653,16 @@ fn try_collect_repeated_items_with_threshold(doc: &Document, min_words: usize) -
         }
         if texts.len() >= 3 {
             let total: usize = texts.iter().map(|t| t.len()).sum();
-            if total > best_total_len {
-                best_group = Some(texts);
+            if best_group
+                .as_ref()
+                .map_or(true, |(best_total_len, _)| total > *best_total_len)
+            {
+                best_group = Some((total, texts));
             }
         }
     }
 
-    best_group.map(|texts| texts.join("\n\n"))
+    best_group.map(|(_, texts)| texts.join("\n\n"))
 }
 
 /// Collect text from repeated children of the same tag within a container.

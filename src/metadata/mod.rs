@@ -3,8 +3,6 @@
 //! This module provides functions for extracting metadata from HTML documents,
 //! including JSON-LD parsing, HTML meta tags, Open Graph, and other sources.
 
-#![allow(unused_imports)]
-
 pub mod dom_extraction;
 pub mod json_ld;
 pub mod meta_tags;
@@ -13,14 +11,6 @@ use dom_query::Document;
 use crate::result::Metadata;
 use crate::url_utils;
 use crate::Options;
-
-pub use dom_extraction::{
-    examine_title_element, extract_dom_author, extract_dom_categories,
-    extract_dom_license, extract_dom_sitename, extract_dom_tags,
-    extract_dom_title, extract_dom_url,
-};
-pub use json_ld::extract_json_ld;
-pub use meta_tags::{examine_meta, extract_open_graph, validate_metadata_name};
 
 /// Extract all metadata from a document.
 ///

@@ -136,7 +136,7 @@ fn max_extracted_len_truncates_on_utf8_char_boundary() {
     let result = extract_with_options(
         html,
         &Options {
-            max_extracted_len: 3,
+            max_extracted_len: 5,
             min_extracted_len: 0,
             min_output_size: 0,
             ..Options::default()
@@ -144,10 +144,8 @@ fn max_extracted_len_truncates_on_utf8_char_boundary() {
     )
     .expect("extraction should not panic or fail");
 
-    assert!(result
-        .content_text
-        .is_char_boundary(result.content_text.len()));
-    assert!(result.content_text.len() <= 3);
+    assert_eq!(result.content_text, "😀");
+    assert!(result.content_text.len() <= 5);
     assert!(result
         .warnings
         .iter()
