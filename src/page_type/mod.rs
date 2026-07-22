@@ -95,6 +95,7 @@ impl PageType {
 /// Controls how the extraction pipeline behaves — which elements to keep,
 /// how strictly to filter boilerplate, and fallback thresholds. Each page
 /// type has a static profile accessed via [`PageType::extraction_profile`].
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct ExtractionProfile {
     /// Whether elements with comment-like classes are considered content.
@@ -858,7 +859,6 @@ fn has_single_product_ld(signals: &HtmlSignals) -> bool {
 // ---------------------------------------------------------------------------
 
 use crate::dom::{Document, Selection};
-use crate::result::Metadata;
 
 /// Forum-specific boilerplate CSS selectors.
 ///
@@ -1049,6 +1049,7 @@ const DOC_BOILERPLATE_SELECTORS: &[&str] = &[
 ///
 /// Remove elements that are decorative or navigational on marketing pages,
 /// while preserving the actual service descriptions, features, and benefits.
+#[allow(dead_code)]
 const SERVICE_BOILERPLATE_SELECTORS: &[&str] = &[
     // Cookie/consent banners
     "[class*='cookie']",
@@ -1448,6 +1449,7 @@ fn contains_any(haystack: &str, needles: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::result::Metadata;
 
     // --- URL classification tests ---
 

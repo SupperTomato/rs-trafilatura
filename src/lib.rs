@@ -68,14 +68,22 @@ pub mod encoding;
 pub mod spider_integration;
 
 // Internal modules — not part of the public API
+#[allow(dead_code)]
 pub(crate) mod dom;
 pub(crate) mod etree;
+#[allow(dead_code)]
 pub(crate) mod lru;
+#[allow(dead_code)]
 pub(crate) mod selector;
+#[allow(dead_code)]
 pub(crate) mod html_processing;
+#[allow(dead_code)]
 pub(crate) mod extractor;
+#[allow(dead_code)]
 pub(crate) mod metadata;
+#[allow(dead_code)]
 pub(crate) mod url_utils;
+#[allow(dead_code)]
 pub(crate) mod link_density;
 
 // Public API - re-exports

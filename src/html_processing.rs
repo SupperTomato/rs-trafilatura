@@ -370,7 +370,7 @@ fn doc_cleaning_inner(doc: &Document, opts: &Options, preserve_tags: &[&str]) {
 
     // === Bulk cleaning via html-cleaning crate ===
     {
-        use html_cleaning::{CleaningOptions, HtmlCleaner};
+        use html_cleaning::HtmlCleaner;
 
         // Start from the trafilatura preset, but disable prune_empty and
         // normalize_whitespace — we handle those with size guards below.

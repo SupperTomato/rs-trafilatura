@@ -261,9 +261,6 @@ pub fn extract_ml_features(doc: &Document, metadata: &Metadata, url: &str) -> [f
             if current_text_len > 50 {
                 section_ratios.push(current_links as f64 / current_text_len as f64 * 1000.0);
             }
-            current_links = 0;
-            current_text_len = 0;
-
             let sel = Selection::from(*node);
             current_links = sel.select("a").length() as u32;
             let text = sel.text();

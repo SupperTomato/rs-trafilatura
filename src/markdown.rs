@@ -566,6 +566,7 @@ fn pad_cell(text: &str, width: usize, align: Alignment) -> String {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 

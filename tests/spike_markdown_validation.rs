@@ -3,6 +3,7 @@
 // Run: cargo test --test spike_markdown_validation
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod markdown_validation_tests {
     use quick_html2md::html_to_markdown;
     use rs_trafilatura::markdown::post_process_markdown;
@@ -156,14 +157,14 @@ mod markdown_validation_tests {
     #[test]
     fn test_empty_elements() {
         let html = "<p></p><strong></strong><em></em>";
-        let md = to_markdown(html);
+        let _md = to_markdown(html);
         assert!(true, "Empty elements handled gracefully");
     }
 
     #[test]
     fn test_malformed_html() {
         let html = "<p>unclosed paragraph";
-        let md = to_markdown(html);
+        let _md = to_markdown(html);
         assert!(true, "Malformed HTML handled without panic");
     }
 

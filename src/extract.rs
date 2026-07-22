@@ -270,7 +270,7 @@ pub(crate) fn extract_content(html: &str, options: &Options) -> Result<ExtractRe
     if profile.aggregate_sections {
         let current_len = content_text.chars().count();
         if current_len < 3000 {
-            if let Some(merged) = try_multi_candidate_merge(&document, options) {
+            if let Some(merged) = try_multi_candidate_merge(&document) {
                 let merged_len = merged.chars().count();
                 // Use merged result if it's substantially more content (2x)
                 // and not excessively large
@@ -651,7 +651,6 @@ fn try_collect_repeated_items_with_threshold(doc: &Document, min_words: usize) -
         if texts.len() >= 3 {
             let total: usize = texts.iter().map(|t| t.len()).sum();
             if total > best_total_len {
-                best_total_len = total;
                 best_group = Some(texts);
             }
         }
@@ -702,7 +701,7 @@ fn collect_sibling_group(
 /// nodes that score above a threshold, remove overlapping (ancestor/descendant)
 /// nodes, and merge their text. This captures content distributed across
 /// multiple sibling sections.
-fn try_multi_candidate_merge(doc: &Document, options: &Options) -> Option<String> {
+fn try_multi_candidate_merge(doc: &Document) -> Option<String> {
     let body = doc.select("body");
     if body.length() == 0 {
         return None;
@@ -801,7 +800,6 @@ fn try_multi_candidate_merge(doc: &Document, options: &Options) -> Option<String
         let overlaps = selected_texts.iter().any(|existing| {
             // Check for text containment in either direction
             let shorter = c.text_len.min(existing.len());
-            let longer = c.text_len.max(existing.len());
             if shorter == 0 {
                 return true;
             }
@@ -833,6 +831,7 @@ fn try_multi_candidate_merge(doc: &Document, options: &Options) -> Option<String
 /// Extracts 27 features from the extraction result and uses an XGBoost
 /// regression model to predict the expected F1 score (0.0-1.0).
 /// Pages scoring below ~0.80 are candidates for LLM fallback.
+#[allow(dead_code)]
 fn compute_extraction_quality_ml(
     content_text: &str,
     content_html: Option<&str>,
@@ -1291,6 +1290,7 @@ fn floor_char_boundary(text: &str, max_len: usize) -> usize {
 /// 4. Link count (nav sections tend to have many links)
 ///
 /// A section is only stripped when multiple signals agree (score >= 5 out of 8).
+#[allow(dead_code)]
 fn strip_link_dense_sections(html: &str) -> String {
     let doc = Document::from(html);
     let body = doc.select("body");
@@ -2118,22 +2118,6 @@ fn find_content_node_bottom_up<'a>(doc: &'a Document) -> Option<Selection<'a>> {
     // Score every paragraph-like element and propagate upward.
     // Also include <div> elements that have no block children (div-as-paragraph).
     // Many modern pages use <div> instead of <p> for text blocks.
-    let block_tags = [
-        "div",
-        "p",
-        "pre",
-        "section",
-        "article",
-        "table",
-        "ul",
-        "ol",
-        "blockquote",
-        "form",
-        "header",
-        "footer",
-        "nav",
-    ];
-
     for node in doc.select("p, pre, div").nodes() {
         let el = Selection::from(*node);
 
@@ -2414,10 +2398,6 @@ fn score_content_node(
     }
 
     let p_count: i64 = match i64::try_from(el.select("p").length()) {
-        Ok(v) => v,
-        Err(_) => i64::MAX,
-    };
-    let a_count: i64 = match i64::try_from(el.select("a").length()) {
         Ok(v) => v,
         Err(_) => i64::MAX,
     };

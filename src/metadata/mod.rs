@@ -3,6 +3,8 @@
 //! This module provides functions for extracting metadata from HTML documents,
 //! including JSON-LD parsing, HTML meta tags, Open Graph, and other sources.
 
+#![allow(unused_imports)]
+
 pub mod dom_extraction;
 pub mod json_ld;
 pub mod meta_tags;

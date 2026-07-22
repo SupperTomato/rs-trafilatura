@@ -42,6 +42,8 @@
 //! pruning::prune_unwanted_sections(&tree, state.potential_tags(), &opts);
 //! ```
 
+#![allow(unused_imports)]
+
 pub mod comments;
 pub mod fallback;
 pub mod handlers;

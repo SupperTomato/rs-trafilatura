@@ -20,6 +20,7 @@
 //! This module re-exports functions from the `html-cleaning` crate.
 
 // Re-export all tree functions from html-cleaning for backward compatibility
+#[allow(unused_imports)]
 pub use html_cleaning::tree::{
     append, element, extend, is_void_element, iter, iter_descendants, iter_text, remove,
     set_tail, set_text, strip, strip_elements, strip_tags, sub_element, tail, tail_nodes, text,
